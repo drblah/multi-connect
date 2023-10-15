@@ -1,10 +1,8 @@
-use std::net::UdpSocket;
 use common::messages;
+use std::net::UdpSocket;
 
 fn main() {
-    let hello = messages::Hello {
-        id: 154,
-    };
+    let hello = messages::Hello { id: 154 };
 
     let hello_message = messages::Messages::Hello(hello);
     let serialized = bincode::serialize(&hello_message).unwrap();

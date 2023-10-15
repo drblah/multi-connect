@@ -1,18 +1,18 @@
-use std::future::Future;
-use std::net::SocketAddr;
-use smol::{Async, net, future, future::FutureExt};
-use futures::select;
-use socket2::SockAddr;
+use crate::connection_manager::ConnectionManager;
 use anyhow::Result;
 use common::messages::EndpointId;
-use crate::connection_manager::ConnectionManager;
+use futures::select;
+use smol::{future, future::FutureExt, net, Async};
+use socket2::SockAddr;
+use std::future::Future;
+use std::net::SocketAddr;
 
 mod connection_manager;
 
 enum Events {
     NewConnection((usize, SocketAddr)),
     NewEstablishedMessage(Result<(EndpointId, Vec<u8>)>),
-    ConnectionTimeout((EndpointId, SocketAddr))
+    ConnectionTimeout((EndpointId, SocketAddr)),
 }
 
 fn main() {
@@ -34,52 +34,53 @@ fn main() {
         let mut conman = ConnectionManager::new(socketaddr, 1);
 
         loop {
-
             if conman.has_endpoints() {
                 // In case we have active connections. Await new connection attempts and await messages
                 // from existing connections.
 
-                let wrapped_server = async { Events::NewConnection(server_socket.recv_from(&mut buffer).await.unwrap()) };
-                let wrapped_endpoints = async { Events::NewEstablishedMessage( conman.await_incoming().await ) };
-                let wrapped_timeout = async { Events::ConnectionTimeout( conman.await_timeout().await ) };
+                let wrapped_server = async {
+                    Events::NewConnection(server_socket.recv_from(&mut buffer).await.unwrap())
+                };
+                let wrapped_endpoints =
+                    async { Events::NewEstablishedMessage(conman.await_incoming().await) };
+                let wrapped_timeout =
+                    async { Events::ConnectionTimeout(conman.await_timeout().await) };
 
-                match wrapped_server.race(wrapped_endpoints).race(wrapped_timeout).await {
+                match wrapped_server
+                    .race(wrapped_endpoints)
+                    .race(wrapped_timeout)
+                    .await
+                {
                     Events::NewConnection((len, addr)) => {
                         conman.handle_hello(buffer[..len].to_vec(), addr).await;
                     }
-                    Events::NewEstablishedMessage(result) => {
-                        match result {
-                            Ok((endpointid, message)) => {
-                                println!("Endpoint: {}, produced message: {:?}", endpointid, message)
-                            }
-                            Err(e) => {
-                                eprintln!("Encountered error: {}", e.to_string())
-                            }
-
+                    Events::NewEstablishedMessage(result) => match result {
+                        Ok((endpointid, message)) => {
+                            println!("Endpoint: {}, produced message: {:?}", endpointid, message)
                         }
-                    }
+                        Err(e) => {
+                            eprintln!("Encountered error: {}", e.to_string())
+                        }
+                    },
                     Events::ConnectionTimeout((endpoint, socket)) => {
                         conman.remove_connection(endpoint, socket)
                     }
-
                 }
-
             } else {
                 // In case we have no connections. Only await new ones
                 println!("Server has no active Endpoints. Waiting...");
 
-                let wrapped_server = async { Events::NewConnection(server_socket.recv_from(&mut buffer).await.unwrap()) };
+                let wrapped_server = async {
+                    Events::NewConnection(server_socket.recv_from(&mut buffer).await.unwrap())
+                };
 
                 match wrapped_server.await {
                     Events::NewConnection((len, addr)) => {
                         conman.handle_hello(buffer[..len].to_vec(), addr).await;
                     }
-                    _ => continue
+                    _ => continue,
                 }
             }
         }
-
     })
-
-
 }

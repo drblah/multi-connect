@@ -1,21 +1,21 @@
-use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::time::{Duration, SystemTime};
-use smol::Async;
-use smol::net::UdpSocket;
-use socket2::SockAddr;
 use anyhow::Result;
+use common::messages::{EndpointId, HelloAck, Messages};
 use futures::future::select_all;
 use futures::StreamExt;
 use smol::future::FutureExt;
 use smol::lock::Mutex;
-use common::messages::{EndpointId, HelloAck, Messages};
+use smol::net::UdpSocket;
+use smol::Async;
+use socket2::SockAddr;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::time::{Duration, SystemTime};
 
 #[derive(Debug, PartialEq)]
 enum ConnectionState {
     Startup,
     Connected,
-    Disconnected
+    Disconnected,
 }
 
 #[derive(Debug)]
@@ -24,7 +24,7 @@ struct Connection {
     last_hello: SystemTime,
     deadline_ticker: Mutex<smol::Timer>,
     state: ConnectionState,
-    buffer: Mutex<[u8; 65535]>
+    buffer: Mutex<[u8; 65535]>,
 }
 
 impl Connection {
@@ -34,7 +34,7 @@ impl Connection {
             last_hello: SystemTime::now(),
             deadline_ticker: Mutex::new(smol::Timer::after(Duration::from_secs(1))),
             state: ConnectionState::Startup,
-            buffer: Mutex::new([0; 65535])
+            buffer: Mutex::new([0; 65535]),
         }
     }
 
@@ -65,7 +65,7 @@ struct Endpoint {
     id: EndpointId,
     connections: HashMap<SocketAddr, Connection>,
     tx_counter: u64,
-    rx_counter: u64
+    rx_counter: u64,
 }
 
 impl Endpoint {
@@ -109,9 +109,7 @@ impl Endpoint {
 
     async fn acknowledge(&mut self, own_id: EndpointId) {
         // Return ACK
-        let ack = HelloAck {
-            id: own_id,
-        };
+        let ack = HelloAck { id: own_id };
         let ack_message = Messages::HelloAck(ack);
 
         let serialized = bincode::serialize(&ack_message).unwrap();
@@ -128,13 +126,10 @@ impl Endpoint {
         let mut futures = Vec::new();
 
         for (_, connection) in self.connections.iter() {
-            futures.push(
-                connection.read().boxed()
-            )
+            futures.push(connection.read().boxed())
         }
 
         let (item_resolved, ready_future_index, _remaining_futures) = select_all(futures).await;
-
 
         Ok((self.id, item_resolved?))
     }
@@ -143,9 +138,7 @@ impl Endpoint {
         let mut futures = Vec::new();
 
         for (_, connection) in self.connections.iter() {
-            futures.push(
-                connection.await_deadline().boxed()
-            )
+            futures.push(connection.await_deadline().boxed())
         }
 
         let (item_resolved, ready_future_index, _remaining_futures) = select_all(futures).await;
@@ -156,14 +149,12 @@ impl Endpoint {
     pub fn has_connections(&self) -> bool {
         self.connections.len() != 0
     }
-
 }
-
 
 pub struct ConnectionManager {
     endpoints: HashMap<EndpointId, Endpoint>,
     local_address: SocketAddr,
-    pub own_id: EndpointId
+    pub own_id: EndpointId,
 }
 
 impl ConnectionManager {
@@ -171,7 +162,7 @@ impl ConnectionManager {
         ConnectionManager {
             endpoints: HashMap::new(),
             local_address,
-            own_id
+            own_id,
         }
     }
 
@@ -183,7 +174,10 @@ impl ConnectionManager {
             if let Messages::Hello(decoded) = decoded {
                 // We know the endpoint already
                 if let Some(endpoint) = self.endpoints.get_mut(&decoded.id) {
-                    match endpoint.add_connection(source_address, self.local_address).await {
+                    match endpoint
+                        .add_connection(source_address, self.local_address)
+                        .await
+                    {
                         Ok(()) => {
                             println!(
                                 "Added {} as a new connection to EP: {}",
@@ -204,7 +198,10 @@ impl ConnectionManager {
                 } else {
                     // Endpoint is unknown. We must create it first
                     let mut new_endpoint = Endpoint::new(decoded.id.clone());
-                    match new_endpoint.add_connection(source_address, self.local_address).await {
+                    match new_endpoint
+                        .add_connection(source_address, self.local_address)
+                        .await
+                    {
                         Ok(()) => {
                             println!(
                                 "Added {} as a new connection to EP: {}",
@@ -224,11 +221,7 @@ impl ConnectionManager {
                     new_endpoint.acknowledge(self.own_id).await;
                     self.endpoints.insert(decoded.id, new_endpoint);
                 }
-
             }
-
-
-
         } else {
             println!("Failed to decode. But lets say hi anyways :^)");
         }
@@ -243,9 +236,7 @@ impl ConnectionManager {
 
         for (_, endpoint) in self.endpoints.iter() {
             if endpoint.has_connections() {
-                futures.push(
-                    endpoint.await_connections().boxed()
-                )
+                futures.push(endpoint.await_connections().boxed())
             }
         }
 
@@ -259,9 +250,7 @@ impl ConnectionManager {
 
         for (_, endpoint) in self.endpoints.iter() {
             if endpoint.has_connections() {
-                futures.push(
-                    endpoint.await_connection_deadlines().boxed()
-                )
+                futures.push(endpoint.await_connection_deadlines().boxed())
             }
         }
 
@@ -272,7 +261,10 @@ impl ConnectionManager {
 
     pub fn remove_connection(&mut self, id: EndpointId, address: SocketAddr) {
         if let Some(endpoint) = self.endpoints.get_mut(&id) {
-            println!("Deadline exceeded. Removing Connection: {} from Endpoint: {}", id, address);
+            println!(
+                "Deadline exceeded. Removing Connection: {} from Endpoint: {}",
+                id, address
+            );
             endpoint.connections.remove(&address).unwrap();
         }
 
@@ -282,7 +274,7 @@ impl ConnectionManager {
             if !endpoint.has_connections() {
                 // All connections has been removed on this endpoint and it should therefore
                 // be removed
-               to_be_removed.push(id.clone())
+                to_be_removed.push(id.clone())
             }
         }
 

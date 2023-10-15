@@ -30,6 +30,5 @@ pub enum Messages {
     Packet(Packet),
     Hello(Hello),
     HelloAck(HelloAck),
-    KeepAlive(KeepAlive)
+    KeepAlive(KeepAlive),
 }
-
