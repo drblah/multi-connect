@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+
+members = [
+  "crates/server",
+  "crates/client",
+  "crates/common"
+]
+
+
+[workspace.package]
+edition = "2021"
+
+[workspace.dependencies]
+
