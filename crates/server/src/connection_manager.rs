@@ -158,6 +158,7 @@ pub struct ConnectionManager {
     endpoints: HashMap<EndpointId, Endpoint>,
     local_address: SocketAddr,
     pub own_id: EndpointId,
+    session_history: Vec<Uuid>
 }
 
 impl ConnectionManager {
@@ -166,6 +167,7 @@ impl ConnectionManager {
             endpoints: HashMap::new(),
             local_address,
             own_id,
+            session_history: Vec::new(),
         }
     }
 
@@ -180,14 +182,21 @@ impl ConnectionManager {
                 if !self.endpoints.contains_key(&decoded.id) {
                     let new_endpoint = Endpoint::new(decoded.id.clone(), decoded.session_id.clone());
                     self.endpoints.insert(decoded.id.clone(), new_endpoint);
+                    self.session_history.push(decoded.session_id.clone());
                 }
 
 
                 if let Some(endpoint) = self.endpoints.get_mut(&decoded.id) {
                     // If the session id has changed. Overwrite the endpoint
                     if endpoint.session_id != decoded.session_id {
-                        println!("Session ID has changed. Overwriting endpoint");
-                        *endpoint = Endpoint::new(decoded.id.clone(), decoded.session_id.clone());
+                        if self.session_history.contains(&decoded.session_id) {
+                            eprintln!("Session ID {} for endpoint {} has already been used. Refusing to accept new connection.", decoded.session_id, decoded.id);
+                            return;
+                        } else {
+                            println!("Session ID has changed. Overwriting endpoint");
+                            *endpoint = Endpoint::new(decoded.id.clone(), decoded.session_id.clone());
+                            self.session_history.push(decoded.session_id.clone());
+                        }
                     }
 
                     // Add connections
@@ -275,5 +284,90 @@ impl ConnectionManager {
         for id in to_be_removed {
             self.endpoints.remove(&id).unwrap();
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+    use common::messages;
+    use crate::connection_manager::ConnectionManager;
+
+    #[test]
+    fn handle_hello_from_empty() {
+        smol::block_on(async {
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1);
+
+            let hello = messages::Hello { id: 154, session_id: Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap() };
+
+            let hello_message = messages::Messages::Hello(hello);
+            let serialized = bincode::serialize(&hello_message).unwrap();
+
+            conman.handle_hello(serialized, "127.0.0.2:123".parse().unwrap()).await;
+
+            assert!(conman.has_endpoints());
+            assert_eq!(conman.endpoints.len(), 1);
+
+            let endpoints = conman.endpoints.get(&154).unwrap();
+
+            assert_eq!(endpoints.session_id, Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap());
+        });
+    }
+    #[test]
+    fn handle_hello_from_overwrite() {
+        smol::block_on(async {
+            let uuids = vec![
+                Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
+                Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap()
+            ];
+
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1);
+
+            for uuid in uuids {
+                let hello = messages::Hello { id: 154, session_id: uuid };
+
+                let hello_message = messages::Messages::Hello(hello);
+                let serialized = bincode::serialize(&hello_message).unwrap();
+
+                conman.handle_hello(serialized, "127.0.0.2:123".parse().unwrap()).await;
+            }
+
+            assert!(conman.has_endpoints());
+            assert_eq!(conman.endpoints.len(), 1);
+
+            let endpoints = conman.endpoints.get(&154).unwrap();
+
+            assert_eq!(endpoints.session_id, Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap());
+        });
+    }
+
+    #[test]
+    fn handle_hello_refuse_overwrite_session_reuse() {
+        smol::block_on(async {
+            let uuids = vec![
+                Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
+                Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap(),
+                Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
+            ];
+
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1);
+
+            for uuid in uuids {
+                let hello = messages::Hello { id: 154, session_id: uuid };
+
+                let hello_message = messages::Messages::Hello(hello);
+                let serialized = bincode::serialize(&hello_message).unwrap();
+
+                conman.handle_hello(serialized, "127.0.0.2:123".parse().unwrap()).await;
+            }
+
+            assert!(conman.has_endpoints());
+            assert_eq!(conman.endpoints.len(), 1);
+
+            let endpoints = conman.endpoints.get(&154).unwrap();
+
+            assert_eq!(endpoints.session_id, Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap());
+        });
     }
 }
