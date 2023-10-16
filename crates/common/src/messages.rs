@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 pub type EndpointId = u16;
 
@@ -13,6 +14,7 @@ pub struct Packet {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Hello {
     pub id: EndpointId,
+    pub session_id: Uuid,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]

@@ -10,6 +10,7 @@ use socket2::SockAddr;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime};
+use uuid::Uuid;
 
 #[derive(Debug, PartialEq)]
 enum ConnectionState {
@@ -32,7 +33,7 @@ impl Connection {
         Connection {
             socket,
             last_hello: SystemTime::now(),
-            deadline_ticker: Mutex::new(smol::Timer::after(Duration::from_secs(1))),
+            deadline_ticker: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
             state: ConnectionState::Startup,
             buffer: Mutex::new([0; 65535]),
         }
@@ -63,16 +64,18 @@ impl Connection {
 
 struct Endpoint {
     id: EndpointId,
+    session_id: Uuid,
     connections: HashMap<SocketAddr, Connection>,
     tx_counter: u64,
     rx_counter: u64,
 }
 
 impl Endpoint {
-    fn new(id: EndpointId) -> Self {
+    fn new(id: EndpointId, session_id: Uuid) -> Self {
         Endpoint {
             id,
             connections: HashMap::new(),
+            session_id,
             tx_counter: 0,
             rx_counter: 0,
         }
@@ -129,7 +132,7 @@ impl Endpoint {
             futures.push(connection.read().boxed())
         }
 
-        let (item_resolved, ready_future_index, _remaining_futures) = select_all(futures).await;
+        let (item_resolved, _ready_future_index, _remaining_futures) = select_all(futures).await;
 
         Ok((self.id, item_resolved?))
     }
@@ -141,7 +144,7 @@ impl Endpoint {
             futures.push(connection.await_deadline().boxed())
         }
 
-        let (item_resolved, ready_future_index, _remaining_futures) = select_all(futures).await;
+        let (item_resolved, _ready_future_index, _remaining_futures) = select_all(futures).await;
 
         (self.id, item_resolved)
     }
@@ -172,8 +175,22 @@ impl ConnectionManager {
             println!("{:?}", decoded);
 
             if let Messages::Hello(decoded) = decoded {
-                // We know the endpoint already
+
+                // Ensure endpoint exists
+                if !self.endpoints.contains_key(&decoded.id) {
+                    let new_endpoint = Endpoint::new(decoded.id.clone(), decoded.session_id.clone());
+                    self.endpoints.insert(decoded.id.clone(), new_endpoint);
+                }
+
+
                 if let Some(endpoint) = self.endpoints.get_mut(&decoded.id) {
+                    // If the session id has changed. Overwrite the endpoint
+                    if endpoint.session_id != decoded.session_id {
+                        println!("Session ID has changed. Overwriting endpoint");
+                        *endpoint = Endpoint::new(decoded.id.clone(), decoded.session_id.clone());
+                    }
+
+                    // Add connections
                     match endpoint
                         .add_connection(source_address, self.local_address)
                         .await
@@ -195,31 +212,8 @@ impl ConnectionManager {
                             )
                         }
                     }
-                } else {
-                    // Endpoint is unknown. We must create it first
-                    let mut new_endpoint = Endpoint::new(decoded.id.clone());
-                    match new_endpoint
-                        .add_connection(source_address, self.local_address)
-                        .await
-                    {
-                        Ok(()) => {
-                            println!(
-                                "Added {} as a new connection to EP: {}",
-                                source_address, decoded.id
-                            )
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "Failed to add {} as new connection to EP: {} due to error: {}",
-                                source_address,
-                                decoded.id,
-                                e.to_string()
-                            )
-                        }
-                    }
 
-                    new_endpoint.acknowledge(self.own_id).await;
-                    self.endpoints.insert(decoded.id, new_endpoint);
+                    endpoint.acknowledge(self.own_id).await;
                 }
             }
         } else {
@@ -240,7 +234,7 @@ impl ConnectionManager {
             }
         }
 
-        let (item_resolved, ready_future_index, _remaining_futures) = select_all(futures).await;
+        let (item_resolved, _ready_future_index, _remaining_futures) = select_all(futures).await;
 
         Ok(item_resolved?)
     }
@@ -254,7 +248,7 @@ impl ConnectionManager {
             }
         }
 
-        let (item_resolved, ready_future_index, _remaining_futures) = select_all(futures).await;
+        let (item_resolved, _ready_future_index, _remaining_futures) = select_all(futures).await;
 
         item_resolved
     }

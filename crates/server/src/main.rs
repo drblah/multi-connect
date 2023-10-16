@@ -1,10 +1,8 @@
 use crate::connection_manager::ConnectionManager;
 use anyhow::Result;
 use common::messages::EndpointId;
-use futures::select;
-use smol::{future, future::FutureExt, net, Async};
+use smol::{future::FutureExt, net, Async};
 use socket2::SockAddr;
-use std::future::Future;
 use std::net::SocketAddr;
 
 mod connection_manager;
