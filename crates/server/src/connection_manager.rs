@@ -1,5 +1,5 @@
 use anyhow::Result;
-use common::messages::{EndpointId, HelloAck, Messages};
+use common::messages::{EndpointId, HelloAck, Messages, Packet};
 use futures::future::select_all;
 use futures::StreamExt;
 use smol::future::FutureExt;
@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime};
 use uuid::Uuid;
+use common::sequencer::Sequencer;
 
 #[derive(Debug, PartialEq)]
 enum ConnectionState {
@@ -23,7 +24,7 @@ enum ConnectionState {
 struct Connection {
     socket: UdpSocket,
     last_hello: SystemTime,
-    deadline_ticker: Mutex<smol::Timer>,
+    connection_timeout: Mutex<smol::Timer>,
     state: ConnectionState,
     buffer: Mutex<[u8; 65535]>,
 }
@@ -33,7 +34,7 @@ impl Connection {
         Connection {
             socket,
             last_hello: SystemTime::now(),
-            deadline_ticker: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
+            connection_timeout: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
             state: ConnectionState::Startup,
             buffer: Mutex::new([0; 65535]),
         }
@@ -54,8 +55,8 @@ impl Connection {
         let _len = self.socket.send(&packet).await.unwrap();
     }
 
-    pub async fn await_deadline(&self) -> SocketAddr {
-        let mut deadline_lock = self.deadline_ticker.lock().await;
+    pub async fn await_connection_timeout(&self) -> SocketAddr {
+        let mut deadline_lock = self.connection_timeout.lock().await;
 
         deadline_lock.next().await;
         self.socket.peer_addr().unwrap()
@@ -67,7 +68,7 @@ struct Endpoint {
     session_id: Uuid,
     connections: HashMap<SocketAddr, Connection>,
     tx_counter: u64,
-    rx_counter: u64,
+    packet_sorter: Sequencer
 }
 
 impl Endpoint {
@@ -77,7 +78,7 @@ impl Endpoint {
             connections: HashMap::new(),
             session_id,
             tx_counter: 0,
-            rx_counter: 0,
+            packet_sorter: Sequencer::new(Duration::from_secs(1)),
         }
     }
 
@@ -137,16 +138,22 @@ impl Endpoint {
         Ok((self.id, item_resolved?))
     }
 
-    async fn await_connection_deadlines(&self) -> (EndpointId, SocketAddr) {
+    async fn await_connection_timeouts(&self) -> (EndpointId, SocketAddr) {
         let mut futures = Vec::new();
 
         for (_, connection) in self.connections.iter() {
-            futures.push(connection.await_deadline().boxed())
+            futures.push(connection.await_connection_timeout().boxed())
         }
 
         let (item_resolved, _ready_future_index, _remaining_futures) = select_all(futures).await;
 
         (self.id, item_resolved)
+    }
+
+    async fn await_sequencer_deadline(&self) -> EndpointId {
+        self.packet_sorter.await_deadline().await;
+
+        self.id
     }
 
     pub fn has_connections(&self) -> bool {
@@ -230,6 +237,29 @@ impl ConnectionManager {
         }
     }
 
+    pub async fn handle_established_message(&mut self, message: Vec<u8>, endpoint_id: EndpointId) {
+        if let Ok(decoded) = bincode::deserialize::<Messages>(&message) {
+            match decoded {
+                Messages::Packet(packet) => {
+                    self.handle_tunnel_message(packet, endpoint_id).await;
+                }
+                Messages::Hello(_) => {
+                    unimplemented!()
+                }
+                Messages::HelloAck(_) => {
+                    unimplemented!()
+                }
+                Messages::KeepAlive(_) => {
+                    todo!()
+                }
+            }
+        }
+    }
+
+    async fn handle_tunnel_message(&mut self, packet: Packet, endpoint_id: EndpointId) {
+        
+    }
+
     pub fn has_endpoints(&self) -> bool {
         self.endpoints.len() != 0
     }
@@ -253,7 +283,7 @@ impl ConnectionManager {
 
         for (_, endpoint) in self.endpoints.iter() {
             if endpoint.has_connections() {
-                futures.push(endpoint.await_connection_deadlines().boxed())
+                futures.push(endpoint.await_connection_timeouts().boxed())
             }
         }
 
@@ -284,6 +314,20 @@ impl ConnectionManager {
         for id in to_be_removed {
             self.endpoints.remove(&id).unwrap();
         }
+    }
+
+    pub async fn await_packet_sorters(&self) -> EndpointId {
+        let mut futures = Vec::new();
+
+        for (_, endpoint) in self.endpoints.iter() {
+            if endpoint.has_connections() {
+                futures.push(endpoint.await_sequencer_deadline().boxed())
+            }
+        }
+
+        let (item_resolved, _ready_future_index, _remaining_futures) = select_all(futures).await;
+
+        item_resolved
     }
 }
 

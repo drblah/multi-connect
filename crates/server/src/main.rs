@@ -11,6 +11,7 @@ enum Events {
     NewConnection((usize, SocketAddr)),
     NewEstablishedMessage(Result<(EndpointId, Vec<u8>)>),
     ConnectionTimeout((EndpointId, SocketAddr)),
+    PacketSorter(EndpointId)
 }
 
 fn main() {
@@ -41,12 +42,16 @@ fn main() {
                 };
                 let wrapped_endpoints =
                     async { Events::NewEstablishedMessage(conman.await_incoming().await) };
-                let wrapped_timeout =
+                let wrapped_connection_timeout =
                     async { Events::ConnectionTimeout(conman.await_timeout().await) };
+                let wrapped_packet_sorter = async {
+                    Events::PacketSorter(conman.await_packet_sorters().await)
+                };
 
                 match wrapped_server
                     .race(wrapped_endpoints)
-                    .race(wrapped_timeout)
+                    .race(wrapped_connection_timeout)
+                    .race(wrapped_packet_sorter)
                     .await
                 {
                     Events::NewConnection((len, addr)) => {
@@ -62,6 +67,9 @@ fn main() {
                     },
                     Events::ConnectionTimeout((endpoint, socket)) => {
                         conman.remove_connection(endpoint, socket)
+                    }
+                    Events::PacketSorter(endpoint) => {
+                        todo!()
                     }
                 }
             } else {
