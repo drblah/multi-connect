@@ -24,6 +24,8 @@ enum ConnectionState {
 struct Connection {
     socket: UdpSocket,
     last_hello: SystemTime,
+
+    // TODO: Expose this connection timeout as a user configuration
     connection_timeout: Mutex<smol::Timer>,
     state: ConnectionState,
     buffer: Mutex<[u8; 65535]>,
@@ -328,6 +330,13 @@ impl ConnectionManager {
         let (item_resolved, _ready_future_index, _remaining_futures) = select_all(futures).await;
 
         item_resolved
+    }
+
+    pub async fn handle_packet_sorter_deadline(&mut self, endpoint_id: EndpointId) {
+        println!("Handling sorter deadline for {}", endpoint_id);
+        if let Some(endpoint) = self.endpoints.get_mut(&endpoint_id) {
+            endpoint.packet_sorter.advance_queue().await
+        }
     }
 }
 

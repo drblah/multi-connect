@@ -8,6 +8,8 @@ use crate::messages::Packet;
 pub struct Sequencer {
     packet_queue: BTreeMap<u64, Packet>,
     pub next_seq: u64,
+
+    // TODO: Expose this deadline as a user configuration
     deadline: Duration,
     deadline_timer: Mutex<smol::Timer>,
 }
@@ -38,17 +40,28 @@ impl Sequencer {
         None
     }
 
-    pub fn insert_packet(&mut self, pkt: Packet) {
+    pub async fn insert_packet(&mut self, pkt: Packet) {
         if pkt.seq >= self.next_seq {
             self.packet_queue.entry(pkt.seq)
                 .or_insert(pkt);
+
+
+            // Start deadline timer when we have new packets
+            let mut deadline_timer_lock = self.deadline_timer.lock().await;
+            if !deadline_timer_lock.will_fire() {
+                deadline_timer_lock.set_after(self.deadline)
+            }
         }
     }
 
-    pub fn advance_queue(&mut self) {
+    pub async fn advance_queue(&mut self) {
         if !self.packet_queue.is_empty() {
             self.next_seq = *self.packet_queue.first_entry().unwrap().key();
         }
+
+        // Disable deadline timer until we get the next packet
+        let mut deadline_timer_lock = self.deadline_timer.lock().await;
+        *deadline_timer_lock = smol::Timer::never();
     }
 
     pub fn get_queue_length(&self) -> usize {

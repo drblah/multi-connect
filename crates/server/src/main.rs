@@ -68,8 +68,8 @@ fn main() {
                     Events::ConnectionTimeout((endpoint, socket)) => {
                         conman.remove_connection(endpoint, socket)
                     }
-                    Events::PacketSorter(endpoint) => {
-                        todo!()
+                    Events::PacketSorter(endpoint_id) => {
+                        conman.handle_packet_sorter_deadline(endpoint_id).await;
                     }
                 }
             } else {
