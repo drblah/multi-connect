@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -15,6 +16,7 @@ pub struct Packet {
 pub struct Hello {
     pub id: EndpointId,
     pub session_id: Uuid,
+    pub tun_address: IpAddr
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]

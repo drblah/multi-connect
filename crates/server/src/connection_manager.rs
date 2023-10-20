@@ -8,7 +8,7 @@ use smol::net::UdpSocket;
 use smol::Async;
 use socket2::SockAddr;
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, SystemTime};
 use uuid::Uuid;
 use common::sequencer::Sequencer;
@@ -167,7 +167,8 @@ pub struct ConnectionManager {
     endpoints: HashMap<EndpointId, Endpoint>,
     local_address: SocketAddr,
     pub own_id: EndpointId,
-    session_history: Vec<Uuid>
+    session_history: Vec<Uuid>,
+    routes: HashMap<EndpointId, IpAddr>
 }
 
 impl ConnectionManager {
@@ -177,6 +178,7 @@ impl ConnectionManager {
             local_address,
             own_id,
             session_history: Vec::new(),
+            routes: HashMap::new(),
         }
     }
 
@@ -232,6 +234,9 @@ impl ConnectionManager {
                     }
 
                     endpoint.acknowledge(self.own_id).await;
+
+                    // Add route
+                    self.routes.insert(decoded.id, source_address.ip());
                 }
             }
         } else {
@@ -259,7 +264,7 @@ impl ConnectionManager {
     }
 
     async fn handle_tunnel_message(&mut self, packet: Packet, endpoint_id: EndpointId) {
-        
+        todo!()
     }
 
     pub fn has_endpoints(&self) -> bool {
@@ -315,6 +320,7 @@ impl ConnectionManager {
 
         for id in to_be_removed {
             self.endpoints.remove(&id).unwrap();
+            self.routes.remove(&id).unwrap();
         }
     }
 

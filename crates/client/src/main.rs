@@ -2,7 +2,7 @@ use common::messages;
 use std::net::UdpSocket;
 
 fn main() {
-    let hello = messages::Hello { id: 154, session_id: uuid::Uuid::new_v4() };
+    let hello = messages::Hello { id: 154, session_id: uuid::Uuid::new_v4(), tun_address: "127.0.0.50".parse().unwrap() };
 
     let hello_message = messages::Messages::Hello(hello);
     let serialized = bincode::serialize(&hello_message).unwrap();
