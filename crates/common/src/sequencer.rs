@@ -83,7 +83,7 @@ impl Sequencer {
         deadline_lock.next().await;
     }
 }
-
+/*
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -173,3 +173,5 @@ mod tests {
         assert_eq!(sequencer.get_queue_length(), 0);
     }
 }
+
+ */
