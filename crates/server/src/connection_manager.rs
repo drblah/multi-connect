@@ -9,7 +9,10 @@ use smol::Async;
 use socket2::SockAddr;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::ops::AddAssign;
 use std::time::{Duration, SystemTime};
+use etherparse::{InternetSlice, SlicedPacket};
+use log::{error, info, warn};
 use uuid::Uuid;
 use common::sequencer::Sequencer;
 
@@ -168,7 +171,7 @@ pub struct ConnectionManager {
     local_address: SocketAddr,
     pub own_id: EndpointId,
     session_history: Vec<Uuid>,
-    routes: HashMap<EndpointId, IpAddr>
+    routes: HashMap<IpAddr, EndpointId>
 }
 
 impl ConnectionManager {
@@ -184,8 +187,8 @@ impl ConnectionManager {
 
     pub async fn handle_hello(&mut self, message: Vec<u8>, source_address: SocketAddr) {
         if let Ok(decoded) = bincode::deserialize::<Messages>(&message) {
-            println!("Hello decoded!");
-            println!("{:?}", decoded);
+            info!("Hello decoded!");
+            info!("{:?}", decoded);
 
             if let Messages::Hello(decoded) = decoded {
 
@@ -201,10 +204,10 @@ impl ConnectionManager {
                     // If the session id has changed. Overwrite the endpoint
                     if endpoint.session_id != decoded.session_id {
                         if self.session_history.contains(&decoded.session_id) {
-                            eprintln!("Session ID {} for endpoint {} has already been used. Refusing to accept new connection.", decoded.session_id, decoded.id);
+                            error!("Session ID {} for endpoint {} has already been used. Refusing to accept new connection.", decoded.session_id, decoded.id);
                             return;
                         } else {
-                            println!("Session ID has changed. Overwriting endpoint");
+                            info!("Session ID has changed. Overwriting endpoint");
                             *endpoint = Endpoint::new(decoded.id.clone(), decoded.session_id.clone());
                             self.session_history.push(decoded.session_id.clone());
                         }
@@ -216,7 +219,7 @@ impl ConnectionManager {
                         .await
                     {
                         Ok(()) => {
-                            println!(
+                            info!(
                                 "Added {} as a new connection to EP: {}",
                                 source_address, decoded.id
                             );
@@ -224,7 +227,7 @@ impl ConnectionManager {
                             endpoint.acknowledge(self.own_id).await
                         }
                         Err(e) => {
-                            eprintln!(
+                            error!(
                                 "Failed to add {} as new connection to EP: {} due to error: {}",
                                 source_address,
                                 decoded.id,
@@ -236,11 +239,11 @@ impl ConnectionManager {
                     endpoint.acknowledge(self.own_id).await;
 
                     // Add route
-                    self.routes.insert(decoded.id, source_address.ip());
+                    self.routes.insert(decoded.tun_address, decoded.id);
                 }
             }
         } else {
-            println!("Failed to decode. But lets say hi anyways :^)");
+            error!("Failed to decode. But lets say hi anyways :^)");
         }
     }
 
@@ -263,8 +266,61 @@ impl ConnectionManager {
         }
     }
 
-    async fn handle_tunnel_message(&mut self, packet: Packet, endpoint_id: EndpointId) {
+    pub async fn handle_tunnel_message(&mut self, packet: Packet, endpoint_id: EndpointId) {
         todo!()
+    }
+
+    fn get_route(&self, packet_bytes: &[u8]) -> Option<EndpointId> {
+        match SlicedPacket::from_ip(packet_bytes) {
+            Err(e) => {
+                error!("Error learning tun_ip: {}", e);
+                None
+            }
+
+            Ok(ip_packet) => {
+                match ip_packet.ip {
+                    Some(InternetSlice::Ipv4(ipheader, ..)) => {
+                        let ipv4 = IpAddr::V4(ipheader.destination_addr());
+                        return self.routes.get(&ipv4).cloned();
+
+                    }
+                    Some(InternetSlice::Ipv6(_, _)) => {
+                        warn!("TODO: Handle learning IPv6 route");
+                        None
+                    }
+                    None => {
+                        warn!("No IP header detected. Cannot learn route!");
+                        None
+                    }
+                }
+            }
+        }
+    }
+
+    pub async fn handle_packet_from_tun(&mut self, packet: &[u8]) {
+        // Look up route based on packet destination IP
+        if let Some(endpoint_id) = self.get_route(packet) {
+            // get endpoint
+            let endpoint = self.endpoints.get_mut(&endpoint_id).unwrap();
+
+            // Encapsulate packet in messages::Packet
+            let packet = Packet {
+                seq: endpoint.tx_counter,
+                id: endpoint.id,
+                bytes: packet.to_vec(),
+            };
+
+            let serialized_pakcet = bincode::serialize(&Messages::Packet(packet)).unwrap();
+
+            endpoint.tx_counter.add_assign(1);
+
+            // Send to endpoint
+            for (_address, connection) in &mut endpoint.connections {
+                connection.write(serialized_pakcet.clone()).await;
+            }
+        } else {
+            warn!("No route found for packet. Dropping packet");
+        }
     }
 
     pub fn has_endpoints(&self) -> bool {
@@ -301,7 +357,7 @@ impl ConnectionManager {
 
     pub fn remove_connection(&mut self, id: EndpointId, address: SocketAddr) {
         if let Some(endpoint) = self.endpoints.get_mut(&id) {
-            println!(
+            info!(
                 "Deadline exceeded. Removing Connection: {} from Endpoint: {}",
                 id, address
             );
@@ -320,7 +376,9 @@ impl ConnectionManager {
 
         for id in to_be_removed {
             self.endpoints.remove(&id).unwrap();
-            self.routes.remove(&id).unwrap();
+
+            // Iterate self.routes and remove where the key is equal to id
+            self.routes.retain(|_key, value| value != &id)
         }
     }
 
@@ -339,7 +397,7 @@ impl ConnectionManager {
     }
 
     pub async fn handle_packet_sorter_deadline(&mut self, endpoint_id: EndpointId) {
-        println!("Handling sorter deadline for {}", endpoint_id);
+        info!("Handling sorter deadline for {}", endpoint_id);
         if let Some(endpoint) = self.endpoints.get_mut(&endpoint_id) {
             endpoint.packet_sorter.advance_queue().await
         }

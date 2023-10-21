@@ -4,6 +4,7 @@ use common::messages::EndpointId;
 use smol::{future::FutureExt, net, Async};
 use socket2::SockAddr;
 use std::net::SocketAddr;
+use log::{error, info};
 
 mod connection_manager;
 
@@ -11,10 +12,13 @@ enum Events {
     NewConnection((usize, SocketAddr)),
     NewEstablishedMessage(Result<(EndpointId, Vec<u8>)>),
     ConnectionTimeout((EndpointId, SocketAddr)),
-    PacketSorter(EndpointId)
+    PacketSorter(EndpointId),
+    TunnelPacket(usize)
 }
 
 fn main() {
+    env_logger::init();
+
     smol::block_on(async {
         let server_socket =
             socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None).unwrap();
@@ -28,7 +32,10 @@ fn main() {
 
         let server_socket = net::UdpSocket::from(Async::try_from(server_socket).unwrap());
 
-        let mut buffer = [0u8; 65535];
+        let mut udp_buffer = [0u8; 65535];
+        let mut tun_buffer = [0u8; 65535];
+
+        let mut tun_device = common::tun_device::AsyncTun::new("tun0", "10.12.0.1".parse().unwrap(), "255.255.255.0".parse().unwrap()).unwrap();
 
         let mut conman = ConnectionManager::new(socketaddr, 1);
 
@@ -38,7 +45,7 @@ fn main() {
                 // from existing connections.
 
                 let wrapped_server = async {
-                    Events::NewConnection(server_socket.recv_from(&mut buffer).await.unwrap())
+                    Events::NewConnection(server_socket.recv_from(&mut udp_buffer).await.unwrap())
                 };
                 let wrapped_endpoints =
                     async { Events::NewEstablishedMessage(conman.await_incoming().await) };
@@ -47,22 +54,27 @@ fn main() {
                 let wrapped_packet_sorter = async {
                     Events::PacketSorter(conman.await_packet_sorters().await)
                 };
+                let wrapped_tunnel_device = async {
+                    Events::TunnelPacket(tun_device.read(&mut tun_buffer).await.unwrap())
+                };
 
                 match wrapped_server
                     .race(wrapped_endpoints)
                     .race(wrapped_connection_timeout)
                     .race(wrapped_packet_sorter)
+                    .race(wrapped_tunnel_device)
                     .await
                 {
                     Events::NewConnection((len, addr)) => {
-                        conman.handle_hello(buffer[..len].to_vec(), addr).await;
+                        conman.handle_hello(udp_buffer[..len].to_vec(), addr).await;
                     }
                     Events::NewEstablishedMessage(result) => match result {
                         Ok((endpointid, message)) => {
-                            println!("Endpoint: {}, produced message: {:?}", endpointid, message)
+                            info!("Endpoint: {}, produced message: {:?}", endpointid, message);
+
                         }
                         Err(e) => {
-                            eprintln!("Encountered error: {}", e.to_string())
+                            error!("Encountered error: {}", e.to_string())
                         }
                     },
                     Events::ConnectionTimeout((endpoint, socket)) => {
@@ -71,18 +83,21 @@ fn main() {
                     Events::PacketSorter(endpoint_id) => {
                         conman.handle_packet_sorter_deadline(endpoint_id).await;
                     }
+                    Events::TunnelPacket(len) => {
+                        conman.handle_packet_from_tun(&tun_buffer[..len]).await;
+                    }
                 }
             } else {
                 // In case we have no connections. Only await new ones
-                println!("Server has no active Endpoints. Waiting...");
+                info!("Server has no active Endpoints. Waiting...");
 
                 let wrapped_server = async {
-                    Events::NewConnection(server_socket.recv_from(&mut buffer).await.unwrap())
+                    Events::NewConnection(server_socket.recv_from(&mut udp_buffer).await.unwrap())
                 };
 
                 match wrapped_server.await {
                     Events::NewConnection((len, addr)) => {
-                        conman.handle_hello(buffer[..len].to_vec(), addr).await;
+                        conman.handle_hello(udp_buffer[..len].to_vec(), addr).await;
                     }
                     _ => continue,
                 }

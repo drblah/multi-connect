@@ -5,13 +5,13 @@ use smol::fs::{File};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 use tun::platform::Device;
 
-struct AsyncTun {
+pub struct AsyncTun {
     device: Device,
     file: File,
 }
 
 impl AsyncTun {
-    fn new(tun_device_name: &str, ip: IpAddr, netmask: IpAddr) -> Result<Self> {
+    pub fn new(tun_device_name: &str, ip: IpAddr, netmask: IpAddr) -> Result<Self> {
         let mut config = tun::Configuration::default();
 
         // TODO: Handle IPv6 TUN addresses on creation
@@ -42,11 +42,11 @@ impl AsyncTun {
         return Err(anyhow::anyhow!("Could not open tun device"));
     }
 
-    async fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+    pub async fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.file.read(buf).await
     }
 
-    async fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    pub async fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.file.write(buf).await
     }
 }
