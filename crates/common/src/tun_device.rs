@@ -21,7 +21,7 @@ impl AsyncTun {
             .netmask(netmask)
             .up();
 
-        let mut dev = tun::create(&config)?;
+        let dev = tun::create(&config)?;
 
         let mut file = None;
         unsafe {
@@ -29,7 +29,7 @@ impl AsyncTun {
         }
 
         if file.is_some() {
-            let mut file = file.unwrap();
+            let file = file.unwrap();
 
             let async_tun = AsyncTun{
                 device: dev,
