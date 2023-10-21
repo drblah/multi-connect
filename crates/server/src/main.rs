@@ -10,7 +10,7 @@ mod connection_manager;
 
 enum Events {
     NewConnection((usize, SocketAddr)),
-    NewEstablishedMessage(Result<(EndpointId, Vec<u8>)>),
+    NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr)>),
     ConnectionTimeout((EndpointId, SocketAddr)),
     PacketSorter(EndpointId),
     TunnelPacket(usize)
@@ -69,8 +69,9 @@ fn main() {
                         conman.handle_hello(udp_buffer[..len].to_vec(), addr).await;
                     }
                     Events::NewEstablishedMessage(result) => match result {
-                        Ok((endpointid, message)) => {
+                        Ok((endpointid, message, source_address)) => {
                             info!("Endpoint: {}, produced message: {:?}", endpointid, message);
+                            conman.handle_established_message(message, endpointid, source_address).await;
 
                         }
                         Err(e) => {
