@@ -16,17 +16,19 @@ pub struct ConnectionManager {
     local_address: SocketAddr,
     pub own_id: EndpointId,
     session_history: Vec<Uuid>,
-    routes: HashMap<IpAddr, EndpointId>
+    routes: HashMap<IpAddr, EndpointId>,
+    pub tun_address: IpAddr
 }
 
 impl ConnectionManager {
-    pub fn new(local_address: SocketAddr, own_id: EndpointId) -> ConnectionManager {
+    pub fn new(local_address: SocketAddr, own_id: EndpointId, tun_address: IpAddr) -> ConnectionManager {
         ConnectionManager {
             endpoints: HashMap::new(),
             local_address,
             own_id,
             session_history: Vec::new(),
             routes: HashMap::new(),
+            tun_address
         }
     }
 
@@ -69,7 +71,7 @@ impl ConnectionManager {
                                 source_address, decoded.id
                             );
 
-                            endpoint.acknowledge(self.own_id).await
+                            endpoint.acknowledge(self.own_id, endpoint.session_id, self.tun_address).await
                         }
                         Err(e) => {
                             error!(
@@ -81,7 +83,7 @@ impl ConnectionManager {
                         }
                     }
 
-                    endpoint.acknowledge(self.own_id).await;
+                    endpoint.acknowledge(self.own_id, endpoint.session_id, self.tun_address).await;
 
                     // Add route
                     self.routes.insert(decoded.tun_address, decoded.id);

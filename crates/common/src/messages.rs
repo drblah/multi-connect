@@ -22,6 +22,8 @@ pub struct Hello {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct HelloAck {
     pub id: EndpointId,
+    pub session_id: Uuid,
+    pub tun_address: IpAddr
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]

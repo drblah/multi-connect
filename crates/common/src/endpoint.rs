@@ -60,9 +60,9 @@ impl Endpoint {
         Ok(())
     }
 
-    pub async fn acknowledge(&mut self, own_id: EndpointId) {
+    pub async fn acknowledge(&mut self, own_id: EndpointId, session_id: Uuid, tun_address: std::net::IpAddr) {
         // Return ACK
-        let ack = HelloAck { id: own_id };
+        let ack = HelloAck { id: own_id, session_id, tun_address };
         let ack_message = Messages::HelloAck(ack);
 
         let serialized = bincode::serialize(&ack_message).unwrap();

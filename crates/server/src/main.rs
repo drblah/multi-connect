@@ -35,9 +35,10 @@ fn main() {
         let mut udp_buffer = [0u8; 65535];
         let mut tun_buffer = [0u8; 65535];
 
-        let mut tun_device = common::tun_device::AsyncTun::new("tun0", "10.12.0.1".parse().unwrap(), "255.255.255.0".parse().unwrap()).unwrap();
+        let tun_address = "10.12.0.1".parse().unwrap();
+        let mut tun_device = common::tun_device::AsyncTun::new("tun0", tun_address, "255.255.255.0".parse().unwrap()).unwrap();
 
-        let mut conman = ConnectionManager::new(socketaddr, 1);
+        let mut conman = ConnectionManager::new(socketaddr, 1, tun_address);
 
         loop {
             if conman.has_endpoints() {
