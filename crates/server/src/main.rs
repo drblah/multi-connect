@@ -1,10 +1,14 @@
 use crate::connection_manager::ConnectionManager;
-use anyhow::Result;
+use anyhow::{Result};
 use common::messages::EndpointId;
 use smol::{future::FutureExt, net, Async};
 use socket2::SockAddr;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
+use async_compat::Compat;
+use futures::StreamExt;
 use log::{error, info};
+use tun::TunPacket;
+use std::io::Error;
 
 mod connection_manager;
 
@@ -13,17 +17,17 @@ enum Events {
     NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr)>),
     ConnectionTimeout((EndpointId, SocketAddr)),
     PacketSorter(EndpointId),
-    TunnelPacket(usize)
+    TunnelPacket(Option<core::result::Result<TunPacket, Error>>)
 }
 
 fn main() {
     env_logger::init();
 
-    smol::block_on(async {
+    smol::block_on(Compat::new (async {
         let server_socket =
             socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None).unwrap();
         server_socket.set_reuse_address(true).unwrap();
-        let socketaddr: SocketAddr = "127.0.0.2:40000".parse().unwrap();
+        let socketaddr: SocketAddr = "172.16.200.4:40000".parse().unwrap();
 
         server_socket.bind(&SockAddr::from(socketaddr)).unwrap();
 
@@ -33,10 +37,23 @@ fn main() {
         let server_socket = net::UdpSocket::from(Async::try_from(server_socket).unwrap());
 
         let mut udp_buffer = [0u8; 65535];
-        let mut tun_buffer = [0u8; 65535];
 
         let tun_address = "10.12.0.1".parse().unwrap();
-        let mut tun_device = common::tun_device::AsyncTun::new("tun0", tun_address, "255.255.255.0".parse().unwrap()).unwrap();
+        //let mut tun_device = common::tun_device::AsyncTun::new("tun0", tun_address, "255.255.255.0".parse().unwrap()).await.unwrap();
+        let mut config = tun::Configuration::default();
+
+        config
+            .address(tun_address)
+            .netmask("255.255.255.0".parse::<IpAddr>().unwrap())
+            .up();
+
+        config.platform(|config| {
+            config.packet_information(false);
+        });
+
+        let tun_device = tun::create_as_async(&config).unwrap();
+        let mut stream = tun_device.into_framed();
+
 
         let mut conman = ConnectionManager::new(socketaddr, 1, tun_address);
 
@@ -56,7 +73,7 @@ fn main() {
                     Events::PacketSorter(conman.await_packet_sorters().await)
                 };
                 let wrapped_tunnel_device = async {
-                    Events::TunnelPacket(tun_device.read(&mut tun_buffer).await.unwrap())
+                    Events::TunnelPacket(stream.next().await)
                 };
 
                 match wrapped_server
@@ -71,8 +88,8 @@ fn main() {
                     }
                     Events::NewEstablishedMessage(result) => match result {
                         Ok((endpointid, message, source_address)) => {
-                            info!("Endpoint: {}, produced message: {:?}", endpointid, message);
-                            conman.handle_established_message(message, endpointid, source_address).await;
+                            //info!("Endpoint: {}, produced message: {:?}", endpointid, message);
+                            conman.handle_established_message(message, endpointid, source_address, &mut stream).await;
 
                         }
                         Err(e) => {
@@ -85,8 +102,15 @@ fn main() {
                     Events::PacketSorter(endpoint_id) => {
                         conman.handle_packet_sorter_deadline(endpoint_id).await;
                     }
-                    Events::TunnelPacket(len) => {
-                        conman.handle_packet_from_tun(&tun_buffer[..len]).await;
+                    Events::TunnelPacket(maybe_packet) => {
+                        if let Some(packet) = maybe_packet {
+                            match packet {
+                                Ok(pkt) => {
+                                    conman.handle_packet_from_tun(&pkt.get_bytes()).await;
+                                }
+                                Err(e) => error!("Error while reading from tun device: {}", e.to_string())
+                            }
+                        }
                     }
                 }
             } else {
@@ -105,5 +129,5 @@ fn main() {
                 }
             }
         }
-    })
+    }))
 }

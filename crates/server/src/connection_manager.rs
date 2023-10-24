@@ -6,7 +6,10 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::ops::AddAssign;
 use etherparse::{InternetSlice, SlicedPacket};
+use futures::SinkExt;
 use log::{error, info, warn};
+use tokio_util::codec::Framed;
+use tun::{AsyncDevice, TunPacket, TunPacketCodec};
 use uuid::Uuid;
 use common::endpoint::Endpoint;
 
@@ -94,11 +97,11 @@ impl ConnectionManager {
         }
     }
 
-    pub async fn handle_established_message(&mut self, message: Vec<u8>, endpoint_id: EndpointId, source_address: SocketAddr) {
+    pub async fn handle_established_message(&mut self, message: Vec<u8>, endpoint_id: EndpointId, source_address: SocketAddr, tun_dev: &mut Framed<AsyncDevice, TunPacketCodec>) {
         if let Ok(decoded) = bincode::deserialize::<Messages>(&message) {
             match decoded {
                 Messages::Packet(packet) => {
-                    self.handle_tunnel_message(packet, endpoint_id).await;
+                    self.handle_tunnel_message(packet, endpoint_id, tun_dev).await;
                 }
                 Messages::Hello(hello) => {
                     if let Some(endpoint) = self.endpoints.get_mut(&hello.id) {
@@ -117,8 +120,10 @@ impl ConnectionManager {
         }
     }
 
-    pub async fn handle_tunnel_message(&mut self, packet: Packet, endpoint_id: EndpointId) {
-        todo!()
+    pub async fn handle_tunnel_message(&mut self, packet: Packet, _endpoint_id: EndpointId, tun_dev: &mut Framed<AsyncDevice, TunPacketCodec>) {
+        tun_dev.send(
+            TunPacket::new(packet.bytes.to_vec())
+        ).await.unwrap();
     }
 
     fn get_route(&self, packet_bytes: &[u8]) -> Option<EndpointId> {
@@ -170,7 +175,7 @@ impl ConnectionManager {
                 connection.write(serialized_pakcet.clone()).await;
             }
         } else {
-            warn!("No route found for packet: {:?}. Dropping packet", packet);
+            warn!("No route found for packet. Dropping packet");
         }
     }
 
