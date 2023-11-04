@@ -1,5 +1,5 @@
 use anyhow::Result;
-use common::messages::{EndpointId, Messages, Packet};
+use crate::messages::{EndpointId, Messages, Packet};
 use futures::future::select_all;
 use smol::future::FutureExt;
 use std::collections::HashMap;
@@ -9,7 +9,7 @@ use etherparse::{InternetSlice, SlicedPacket};
 use log::{error, info, warn};
 use tokio_tun::Tun;
 use uuid::Uuid;
-use common::endpoint::Endpoint;
+use crate::endpoint::Endpoint;
 
 
 pub struct ConnectionManager {
@@ -33,6 +33,7 @@ impl ConnectionManager {
         }
     }
 
+    /// Handles new incomming connections and keeps existing connections alive
     pub async fn handle_hello(&mut self, message: Vec<u8>, source_address: SocketAddr) {
         if let Ok(decoded) = bincode::deserialize::<Messages>(&message) {
             info!("Hello decoded!");
@@ -124,6 +125,7 @@ impl ConnectionManager {
         ).await.unwrap();
     }
 
+
     fn get_route(&self, packet_bytes: &[u8]) -> Option<EndpointId> {
         match SlicedPacket::from_ip(packet_bytes) {
             Err(e) => {
@@ -179,7 +181,7 @@ impl ConnectionManager {
                         match e.kind() {
                             std::io::ErrorKind::ConnectionRefused => {
                                 error!("Connection refused. Removing connection: {}", address);
-                                connection.state = common::connection::ConnectionState::Disconnected;
+                                connection.state = crate::connection::ConnectionState::Disconnected;
                             }
                             _ => {
                                 error!("Error while writing to socket: {}", e.to_string());
@@ -259,7 +261,7 @@ impl ConnectionManager {
 
         for (endpoint_id, endpoint) in &self.endpoints {
             for (address, connection) in &endpoint.connections {
-                if connection.state == common::connection::ConnectionState::Disconnected {
+                if connection.state == crate::connection::ConnectionState::Disconnected {
                     to_be_removed.push((endpoint_id.clone(), address.clone()));
                 }
             }

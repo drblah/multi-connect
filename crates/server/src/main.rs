@@ -1,4 +1,4 @@
-use crate::connection_manager::ConnectionManager;
+use common::connection_manager::ConnectionManager;
 use anyhow::{Result};
 use common::messages::EndpointId;
 use smol::{future::FutureExt, net, Async};
@@ -7,9 +7,6 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use async_compat::Compat;
 use log::{error, info};
 use tokio_tun::{TunBuilder};
-
-
-mod connection_manager;
 
 enum Events {
     NewConnection((usize, SocketAddr)),
@@ -48,9 +45,8 @@ fn main() {
                 panic!("Tun address is not an IPv4 address: {}", ipv6)
             }
         };
-        //let mut tun_device = common::tun_device::AsyncTun::new("tun0", tun_address, "255.255.255.0".parse().unwrap()).await.unwrap();
 
-        let mut tun = TunBuilder::new()
+        let mut tun_device = TunBuilder::new()
             .name("")
             .tap(false)
             .packet_info(false)
@@ -81,7 +77,7 @@ fn main() {
                     Events::PacketSorter(conman.await_packet_sorters().await)
                 };
                 let wrapped_tunnel_device = async {
-                    Events::TunnelPacket(tun.recv(&mut tun_buffer).await)
+                    Events::TunnelPacket(tun_device.recv(&mut tun_buffer).await)
                 };
 
                 match wrapped_server
@@ -97,7 +93,7 @@ fn main() {
                     Events::NewEstablishedMessage(result) => match result {
                         Ok((endpointid, message, source_address)) => {
                             //info!("Endpoint: {}, produced message: {:?}", endpointid, message);
-                            conman.handle_established_message(message, endpointid, source_address, &mut tun).await;
+                            conman.handle_established_message(message, endpointid, source_address, &mut tun_device).await;
 
                         }
                         Err(e) => {
