@@ -3,12 +3,11 @@ use anyhow::{Result};
 use common::messages::EndpointId;
 use smol::{future::FutureExt, net, Async};
 use socket2::SockAddr;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use async_compat::Compat;
-use futures::StreamExt;
 use log::{error, info};
-use tun::TunPacket;
-use std::io::Error;
+use tokio_tun::{TunBuilder};
+
 
 mod connection_manager;
 
@@ -17,8 +16,9 @@ enum Events {
     NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr)>),
     ConnectionTimeout((EndpointId, SocketAddr)),
     PacketSorter(EndpointId),
-    TunnelPacket(Option<core::result::Result<TunPacket, Error>>)
+    TunnelPacket(std::io::Result<usize>)
 }
+
 
 fn main() {
     env_logger::init();
@@ -37,22 +37,29 @@ fn main() {
         let server_socket = net::UdpSocket::from(Async::try_from(server_socket).unwrap());
 
         let mut udp_buffer = [0u8; 65535];
+        let mut tun_buffer = [0u8; 65535];
 
-        let tun_address = "10.12.0.1".parse().unwrap();
+        let tun_address: IpAddr = "10.12.0.1".parse().unwrap();
+
+        let tun_address_ipv4 = match tun_address {
+            IpAddr::V4(ipv4) => ipv4,
+            IpAddr::V6(ipv6) => {
+                panic!("Tun address is not an IPv4 address: {}", ipv6)
+            }
+        };
         //let mut tun_device = common::tun_device::AsyncTun::new("tun0", tun_address, "255.255.255.0".parse().unwrap()).await.unwrap();
-        let mut config = tun::Configuration::default();
 
-        config
-            .address(tun_address)
-            .netmask("255.255.255.0".parse::<IpAddr>().unwrap())
-            .up();
-
-        config.platform(|config| {
-            config.packet_information(false);
-        });
-
-        let tun_device = tun::create_as_async(&config).unwrap();
-        let mut stream = tun_device.into_framed();
+        let mut tun = TunBuilder::new()
+            .name("")
+            .tap(false)
+            .packet_info(false)
+            .mtu(1424)
+            .up()
+            .address(tun_address_ipv4)
+            .broadcast(Ipv4Addr::BROADCAST)
+            .netmask(Ipv4Addr::new(255, 255, 255, 0))
+            .try_build()
+            .unwrap();
 
 
         let mut conman = ConnectionManager::new(socketaddr, 1, tun_address);
@@ -73,7 +80,7 @@ fn main() {
                     Events::PacketSorter(conman.await_packet_sorters().await)
                 };
                 let wrapped_tunnel_device = async {
-                    Events::TunnelPacket(stream.next().await)
+                    Events::TunnelPacket(tun.recv(&mut tun_buffer).await)
                 };
 
                 match wrapped_server
@@ -89,7 +96,7 @@ fn main() {
                     Events::NewEstablishedMessage(result) => match result {
                         Ok((endpointid, message, source_address)) => {
                             //info!("Endpoint: {}, produced message: {:?}", endpointid, message);
-                            conman.handle_established_message(message, endpointid, source_address, &mut stream).await;
+                            conman.handle_established_message(message, endpointid, source_address, &mut tun).await;
 
                         }
                         Err(e) => {
@@ -103,13 +110,11 @@ fn main() {
                         conman.handle_packet_sorter_deadline(endpoint_id).await;
                     }
                     Events::TunnelPacket(maybe_packet) => {
-                        if let Some(packet) = maybe_packet {
-                            match packet {
-                                Ok(pkt) => {
-                                    conman.handle_packet_from_tun(&pkt.get_bytes()).await;
-                                }
-                                Err(e) => error!("Error while reading from tun device: {}", e.to_string())
+                        match maybe_packet {
+                            Ok(packet_length) => {
+                                conman.handle_packet_from_tun(&tun_buffer[..packet_length]).await;
                             }
+                            Err(e) => error!("Error while reading from tun device: {}", e.to_string())
                         }
                     }
                 }

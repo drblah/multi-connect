@@ -6,10 +6,8 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::ops::AddAssign;
 use etherparse::{InternetSlice, SlicedPacket};
-use futures::SinkExt;
 use log::{error, info, warn};
-use tokio_util::codec::Framed;
-use tun::{AsyncDevice, TunPacket, TunPacketCodec};
+use tokio_tun::Tun;
 use uuid::Uuid;
 use common::endpoint::Endpoint;
 
@@ -97,7 +95,7 @@ impl ConnectionManager {
         }
     }
 
-    pub async fn handle_established_message(&mut self, message: Vec<u8>, endpoint_id: EndpointId, source_address: SocketAddr, tun_dev: &mut Framed<AsyncDevice, TunPacketCodec>) {
+    pub async fn handle_established_message(&mut self, message: Vec<u8>, endpoint_id: EndpointId, source_address: SocketAddr, tun_dev: &mut Tun) {
         if let Ok(decoded) = bincode::deserialize::<Messages>(&message) {
             match decoded {
                 Messages::Packet(packet) => {
@@ -120,9 +118,9 @@ impl ConnectionManager {
         }
     }
 
-    pub async fn handle_tunnel_message(&mut self, packet: Packet, _endpoint_id: EndpointId, tun_dev: &mut Framed<AsyncDevice, TunPacketCodec>) {
+    pub async fn handle_tunnel_message(&mut self, packet: Packet, _endpoint_id: EndpointId, tun_dev: &mut Tun) {
         tun_dev.send(
-            TunPacket::new(packet.bytes.to_vec())
+            packet.bytes.as_slice()
         ).await.unwrap();
     }
 
