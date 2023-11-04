@@ -8,6 +8,7 @@ use uuid::Uuid;
 use anyhow::Result;
 use smol::future::FutureExt;
 use futures::future::select_all;
+use log::error;
 use crate::connection::{Connection, ConnectionState};
 use crate::messages::{EndpointId, HelloAck, Messages};
 use crate::sequencer::Sequencer;
@@ -67,10 +68,17 @@ impl Endpoint {
 
         let serialized = bincode::serialize(&ack_message).unwrap();
 
-        for (_address, connection) in &mut self.connections {
+        for (address, connection) in &mut self.connections {
             if connection.state == ConnectionState::Startup {
-                connection.write(serialized.clone()).await;
-                connection.state = ConnectionState::Connected;
+                match connection.write(serialized.clone()).await {
+                    Ok(_) => {
+                        connection.state = ConnectionState::Connected;
+                    }
+                    Err(_) => {
+                        error!("Failed to send ACK to {}. Setting as Disconnected", address);
+                        connection.state = ConnectionState::Disconnected;
+                    }
+                }
             }
         }
     }

@@ -20,6 +20,7 @@ enum Events {
 }
 
 
+
 fn main() {
     env_logger::init();
 
@@ -118,6 +119,10 @@ fn main() {
                         }
                     }
                 }
+
+                // Clean up connections which was determined to be disconnected on the last iteration
+                conman.remove_disconnected();
+
             } else {
                 // In case we have no connections. Only await new ones
                 info!("Server has no active Endpoints. Waiting...");

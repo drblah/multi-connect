@@ -44,8 +44,8 @@ impl Connection {
         Ok((buffer_lock[..message_length].to_vec(), self.socket.peer_addr().unwrap()))
     }
 
-    pub async fn write(&self, packet: Vec<u8>) {
-        let _len = self.socket.send(&packet).await.unwrap();
+    pub async fn write(&self, packet: Vec<u8>) -> std::io::Result<usize> {
+        self.socket.send(&packet).await
     }
 
     pub async fn await_connection_timeout(&self) -> SocketAddr {

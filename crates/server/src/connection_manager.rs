@@ -168,10 +168,28 @@ impl ConnectionManager {
 
             endpoint.tx_counter.add_assign(1);
 
+
             // Send to endpoint
-            for (_address, connection) in &mut endpoint.connections {
-                connection.write(serialized_pakcet.clone()).await;
+            for (address, connection) in &mut endpoint.connections {
+                match connection.write(serialized_pakcet.clone()).await {
+                    Ok(_len) => {
+                        continue
+                    }
+                    Err(e) => {
+                        match e.kind() {
+                            std::io::ErrorKind::ConnectionRefused => {
+                                error!("Connection refused. Removing connection: {}", address);
+                                connection.state = common::connection::ConnectionState::Disconnected;
+                            }
+                            _ => {
+                                error!("Error while writing to socket: {}", e.to_string());
+                            }
+
+                        }
+                    }
+                }
             }
+
         } else {
             warn!("No route found for packet. Dropping packet");
         }
@@ -233,6 +251,22 @@ impl ConnectionManager {
 
             // Iterate self.routes and remove where the key is equal to id
             self.routes.retain(|_key, value| value != &id)
+        }
+    }
+
+    pub fn remove_disconnected(&mut self) {
+        let mut to_be_removed = Vec::new();
+
+        for (endpoint_id, endpoint) in &self.endpoints {
+            for (address, connection) in &endpoint.connections {
+                if connection.state == common::connection::ConnectionState::Disconnected {
+                    to_be_removed.push((endpoint_id.clone(), address.clone()));
+                }
+            }
+        }
+
+        for (endpoint_id, address) in to_be_removed {
+            self.remove_connection(endpoint_id, address)
         }
     }
 
