@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use smol::lock::Mutex;
 use std::time::{Duration};
+use log::debug;
 use smol::stream::StreamExt;
 use crate::messages::Packet;
 
@@ -42,8 +43,16 @@ impl Sequencer {
 
     pub async fn insert_packet(&mut self, pkt: Packet) {
         if pkt.seq >= self.next_seq {
-            self.packet_queue.entry(pkt.seq)
-                .or_insert(pkt);
+            if pkt.seq - self.next_seq > 3 {
+                debug!("Large sequence jump detected. Clear packet queue and insert packet");
+                self.packet_queue.clear();
+                self.packet_queue.entry(pkt.seq)
+                    .or_insert(pkt);
+                self.advance_queue().await;
+            } else {
+                self.packet_queue.entry(pkt.seq)
+                    .or_insert(pkt);
+            }
 
 
             // Start deadline timer when we have new packets
