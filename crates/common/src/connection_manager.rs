@@ -129,6 +129,10 @@ impl ConnectionManager {
                             if connection.state == crate::connection::ConnectionState::Startup {
                                 connection.state = crate::connection::ConnectionState::Connected;
                             }
+
+                            if connection.state == crate::connection::ConnectionState::Connected {
+                                connection.reset_hello_timeout().await;
+                            }
                         }
                     } else {
                         error!("Received HelloAck from unknown endpoint: {}", hello_ack.id);
@@ -344,6 +348,21 @@ impl ConnectionManager {
         info!("Handling sorter deadline for {}", endpoint_id);
         if let Some(endpoint) = self.endpoints.get_mut(&endpoint_id) {
             endpoint.packet_sorter.advance_queue().await
+        }
+    }
+
+    pub async fn greet_all_endpoints(&mut self) {
+        for (_endpoint_id, endpoint) in &mut self.endpoints {
+            let hello = Messages::Hello(messages::Hello { id: self.own_id, session_id: endpoint.session_id, tun_address: self.tun_address });
+            let encoded = bincode::serialize(&hello).unwrap();
+
+            for (_address, connection) in &mut endpoint.connections {
+                if connection.state == crate::connection::ConnectionState::Startup {
+
+
+                    connection.write(encoded.clone()).await.unwrap();
+                }
+            }
         }
     }
 }

@@ -1,7 +1,9 @@
 use common::{connection_manager};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::time::{Duration, Instant};
 use anyhow::Result;
 use async_compat::Compat;
+use futures::StreamExt;
 use smol::future::{FutureExt};
 use common::messages::{EndpointId};
 use log::{error, info};
@@ -11,7 +13,8 @@ enum Events {
     NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr)>),
     ConnectionTimeout((EndpointId, SocketAddr)),
     PacketSorter(EndpointId),
-    TunnelPacket(std::io::Result<usize>)
+    TunnelPacket(std::io::Result<usize>),
+    SendKeepalive(Option<Instant>)
 }
 
 fn main() {
@@ -28,7 +31,6 @@ fn main() {
             }
         };
 
-        //let mut tun_device = common::tun_device::AsyncTun::new("tun0", tun_address, "255.255.255.0".parse().unwrap()).await.unwrap();
         let mut tun = TunBuilder::new()
             .name("")
             .tap(false)
@@ -84,16 +86,20 @@ fn main() {
                 let wrapped_tunnel_device = async {
                     Events::TunnelPacket(tun.recv(&mut tun_buffer).await)
                 };
+                let wrapped_keepalive_timer = async {
+                    Events::SendKeepalive( smol::Timer::interval(Duration::from_secs(1)).next().await )
+                };
 
                 match wrapped_connection_timeout
                     .race(wrapped_packet_sorter)
                     .race(wrapped_tunnel_device)
                     .race(wrapped_endpoints)
+                    .race(wrapped_keepalive_timer)
                     .await
                 {
                     Events::NewEstablishedMessage(result) => match result {
                         Ok((endpointid, message, source_address)) => {
-                            info!("Endpoint: {}, produced message: {:?}", endpointid, message);
+                            //info!("Endpoint: {}, produced message: {:?}", endpointid, message);
                             connection_manager.handle_established_message(message, endpointid, source_address, &mut tun).await;
 
                         }
@@ -114,6 +120,9 @@ fn main() {
                             }
                             Err(e) => error!("Error while reading from tun device: {}", e.to_string())
                         }
+                    }
+                    Events::SendKeepalive(_) => {
+                        connection_manager.greet_all_endpoints().await;
                     }
                 }
                 connection_manager.remove_disconnected();
