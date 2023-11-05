@@ -13,10 +13,11 @@ use crate::connection::{Connection, ConnectionState};
 use crate::messages::{EndpointId, HelloAck, Messages};
 use crate::sequencer::Sequencer;
 
+#[derive(Debug)]
 pub struct Endpoint {
     pub id: EndpointId,
     pub session_id: Uuid,
-    pub connections: HashMap<SocketAddr, Connection>,
+    pub connections: Vec<(SocketAddr, Connection)>,
     pub tx_counter: u64,
     pub packet_sorter: Sequencer
 }
@@ -25,7 +26,7 @@ impl Endpoint {
     pub fn new(id: EndpointId, session_id: Uuid) -> Self {
         Endpoint {
             id,
-            connections: HashMap::new(),
+            connections: Vec::new(),
             session_id,
             tx_counter: 0,
             packet_sorter: Sequencer::new(Duration::from_secs(1)),
@@ -38,7 +39,7 @@ impl Endpoint {
         local_address: SocketAddr,
     ) -> Result<(), std::io::Error> {
         // We already know the connection, so we update the last seen time
-        if let Some(connection) = self.connections.get_mut(&source_address) {
+        if let Some((address, connection)) = self.connections.iter_mut().find(|(address, _)| *address == source_address) {
             connection.reset_hello_timeout().await;
         } else {
             let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
@@ -55,7 +56,7 @@ impl Endpoint {
 
             let new_connection = Connection::new(socket);
 
-            self.connections.insert(source_address, new_connection);
+            self.connections.push((source_address, new_connection));
         }
 
         Ok(())

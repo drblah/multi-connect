@@ -10,8 +10,10 @@ use log::{error, info, warn};
 use tokio_tun::Tun;
 use uuid::Uuid;
 use crate::endpoint::Endpoint;
+use crate::{make_socket, messages};
 
 
+#[derive(Debug)]
 pub struct ConnectionManager {
     endpoints: HashMap<EndpointId, Endpoint>,
     local_address: SocketAddr,
@@ -100,7 +102,15 @@ impl ConnectionManager {
         if let Ok(decoded) = bincode::deserialize::<Messages>(&message) {
             match decoded {
                 Messages::Packet(packet) => {
-                    self.handle_tunnel_message(packet, endpoint_id, tun_dev).await;
+                    if let Some(endpoint) = self.endpoints.get_mut(&endpoint_id) {
+                        endpoint.packet_sorter.insert_packet(packet).await;
+
+                        if endpoint.packet_sorter.have_next_packet() {
+                            let packet = endpoint.packet_sorter.get_next_packet().await.unwrap();
+                            self.handle_tunnel_message(packet, endpoint_id, tun_dev).await;
+                        }
+
+                    }
                 }
                 Messages::Hello(hello) => {
                     if let Some(endpoint) = self.endpoints.get_mut(&hello.id) {
@@ -109,8 +119,21 @@ impl ConnectionManager {
                         error!("Received hello from unknown endpoint: {}", hello.id);
                     }
                 }
-                Messages::HelloAck(_) => {
-                    unimplemented!()
+                Messages::HelloAck(helloAck) => {
+                    info!("Received HelloAck: {:?}", helloAck);
+                    info!("Endpoints: {:?}", self.endpoints.keys());
+                    if self.endpoints.contains_key(&helloAck.id) {
+                        info!("Learning route from HelloAck: {}, {}", helloAck.id, helloAck.tun_address);
+                        self.routes.insert(helloAck.tun_address, helloAck.id);
+                        for (_, connection) in self.endpoints.get_mut(&helloAck.id).unwrap().connections.iter_mut() {
+                            if connection.state == crate::connection::ConnectionState::Startup {
+                                connection.state = crate::connection::ConnectionState::Connected;
+                            }
+                        }
+                    } else {
+                        error!("Received HelloAck from unknown endpoint: {}", helloAck.id);
+                    }
+
                 }
                 Messages::KeepAlive(_) => {
                     todo!()
@@ -123,6 +146,35 @@ impl ConnectionManager {
         tun_dev.send(
             packet.bytes.as_slice()
         ).await.unwrap();
+    }
+
+    pub async fn create_new_connection(&mut self, interface_name: &str, local_address: SocketAddr, destination_address: SocketAddr, destination_endpoint_id: EndpointId) {
+
+        let own_ipv4 = match local_address {
+            SocketAddr::V4(addr) => addr.ip().clone(),
+            SocketAddr::V6(_) => panic!("IPv6 not supported")
+        };
+
+        let new_socket = make_socket(interface_name, Some(own_ipv4), None, true);
+
+        new_socket.connect(destination_address).await.unwrap();
+
+        let mut new_endpoint = match self.endpoints.get_mut(&destination_endpoint_id) {
+            Some(endpoint) => endpoint,
+            None => {
+                let mut new_endpoint = Endpoint::new(destination_endpoint_id, Uuid::new_v4());
+                self.endpoints.insert(destination_endpoint_id, new_endpoint);
+                self.endpoints.get_mut(&destination_endpoint_id).unwrap()
+            }
+        };
+
+        let hello = Messages::Hello(messages::Hello { id: self.own_id, session_id: new_endpoint.session_id, tun_address: self.tun_address });
+        let encoded = bincode::serialize(&hello).unwrap();
+
+        new_socket.send(&encoded).await.unwrap();
+        let mut new_connection = crate::connection::Connection::new(new_socket);
+        new_connection.state = crate::connection::ConnectionState::Startup;
+        new_endpoint.connections.push((destination_address, new_connection));
     }
 
 
@@ -235,7 +287,9 @@ impl ConnectionManager {
                 "Deadline exceeded. Removing Connection: {} from Endpoint: {}",
                 id, address
             );
-            endpoint.connections.remove(&address).unwrap();
+            if let Some(index) = endpoint.connections.iter().position(|(addr, _)| addr == &address) {
+                endpoint.connections.remove(index);
+            }
         }
 
         let mut to_be_removed = Vec::new();
@@ -293,6 +347,9 @@ impl ConnectionManager {
         }
     }
 }
+
+
+
 
 
 #[cfg(test)]
