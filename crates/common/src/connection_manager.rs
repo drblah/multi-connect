@@ -119,19 +119,19 @@ impl ConnectionManager {
                         error!("Received hello from unknown endpoint: {}", hello.id);
                     }
                 }
-                Messages::HelloAck(helloAck) => {
-                    info!("Received HelloAck: {:?}", helloAck);
+                Messages::HelloAck(hello_ack) => {
+                    info!("Received HelloAck: {:?}", hello_ack);
                     info!("Endpoints: {:?}", self.endpoints.keys());
-                    if self.endpoints.contains_key(&helloAck.id) {
-                        info!("Learning route from HelloAck: {}, {}", helloAck.id, helloAck.tun_address);
-                        self.routes.insert(helloAck.tun_address, helloAck.id);
-                        for (_, connection) in self.endpoints.get_mut(&helloAck.id).unwrap().connections.iter_mut() {
+                    if self.endpoints.contains_key(&hello_ack.id) {
+                        info!("Learning route from HelloAck: {}, {}", hello_ack.id, hello_ack.tun_address);
+                        self.routes.insert(hello_ack.tun_address, hello_ack.id);
+                        for (_, connection) in self.endpoints.get_mut(&hello_ack.id).unwrap().connections.iter_mut() {
                             if connection.state == crate::connection::ConnectionState::Startup {
                                 connection.state = crate::connection::ConnectionState::Connected;
                             }
                         }
                     } else {
-                        error!("Received HelloAck from unknown endpoint: {}", helloAck.id);
+                        error!("Received HelloAck from unknown endpoint: {}", hello_ack.id);
                     }
 
                 }
@@ -159,10 +159,10 @@ impl ConnectionManager {
 
         new_socket.connect(destination_address).await.unwrap();
 
-        let mut new_endpoint = match self.endpoints.get_mut(&destination_endpoint_id) {
+        let new_endpoint = match self.endpoints.get_mut(&destination_endpoint_id) {
             Some(endpoint) => endpoint,
             None => {
-                let mut new_endpoint = Endpoint::new(destination_endpoint_id, Uuid::new_v4());
+                let new_endpoint = Endpoint::new(destination_endpoint_id, Uuid::new_v4());
                 self.endpoints.insert(destination_endpoint_id, new_endpoint);
                 self.endpoints.get_mut(&destination_endpoint_id).unwrap()
             }

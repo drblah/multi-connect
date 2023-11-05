@@ -1,14 +1,11 @@
-use common::{connection_manager, messages};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use common::{connection_manager};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use anyhow::Result;
 use async_compat::Compat;
 use smol::future::{FutureExt};
-use smol::stream::StreamExt;
-use common::messages::{EndpointId, Messages};
+use common::messages::{EndpointId};
 use log::{error, info};
 use tokio_tun::{TunBuilder};
-
-mod client_connection_manager;
 
 enum Events {
     NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr)>),
@@ -57,7 +54,6 @@ fn main() {
 
         let client_id = 154;
 
-        let mut client_buffer = [0u8; 65535];
         let mut tun_buffer = [0u8; 65535];
 
         let mut connection_manager = connection_manager::ConnectionManager::new(client_socket_address, client_id, client_tun_ip);

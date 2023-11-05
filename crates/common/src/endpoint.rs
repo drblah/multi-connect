@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
 use smol::Async;
@@ -39,7 +38,7 @@ impl Endpoint {
         local_address: SocketAddr,
     ) -> Result<(), std::io::Error> {
         // We already know the connection, so we update the last seen time
-        if let Some((address, connection)) = self.connections.iter_mut().find(|(address, _)| *address == source_address) {
+        if let Some((_address, connection)) = self.connections.iter_mut().find(|(address, _)| *address == source_address) {
             connection.reset_hello_timeout().await;
         } else {
             let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
