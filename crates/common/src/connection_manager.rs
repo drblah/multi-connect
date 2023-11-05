@@ -115,6 +115,7 @@ impl ConnectionManager {
                 Messages::Hello(hello) => {
                     if let Some(endpoint) = self.endpoints.get_mut(&hello.id) {
                         endpoint.add_connection(source_address, self.local_address).await.unwrap();
+                        endpoint.acknowledge( self.own_id, endpoint.session_id, self.tun_address).await;
                     } else {
                         error!("Received hello from unknown endpoint: {}", hello.id);
                     }
@@ -357,7 +358,7 @@ impl ConnectionManager {
             let encoded = bincode::serialize(&hello).unwrap();
 
             for (_address, connection) in &mut endpoint.connections {
-                if connection.state == crate::connection::ConnectionState::Startup {
+                if connection.state == crate::connection::ConnectionState::Connected {
 
 
                     connection.write(encoded.clone()).await.unwrap();

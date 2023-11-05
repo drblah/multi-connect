@@ -7,7 +7,7 @@ use uuid::Uuid;
 use anyhow::Result;
 use smol::future::FutureExt;
 use futures::future::select_all;
-use log::error;
+use log::{error, info};
 use crate::connection::{Connection, ConnectionState};
 use crate::messages::{EndpointId, HelloAck, Messages};
 use crate::sequencer::Sequencer;
@@ -39,6 +39,7 @@ impl Endpoint {
     ) -> Result<(), std::io::Error> {
         // We already know the connection, so we update the last seen time
         if let Some((_address, connection)) = self.connections.iter_mut().find(|(address, _)| *address == source_address) {
+            info!("Reset hello timeout for {}", source_address);
             connection.reset_hello_timeout().await;
         } else {
             let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
@@ -69,7 +70,7 @@ impl Endpoint {
         let serialized = bincode::serialize(&ack_message).unwrap();
 
         for (address, connection) in &mut self.connections {
-            if connection.state == ConnectionState::Startup {
+            if connection.state == ConnectionState::Startup || connection.state == ConnectionState::Connected {
                 match connection.write(serialized.clone()).await {
                     Ok(_) => {
                         connection.state = ConnectionState::Connected;

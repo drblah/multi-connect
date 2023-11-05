@@ -60,6 +60,8 @@ fn main() {
 
         let mut connection_manager = connection_manager::ConnectionManager::new(client_socket_address, client_id, client_tun_ip);
 
+        let mut keepalive_timer = smol::Timer::interval(Duration::from_secs(1));
+
         connection_manager.create_new_connection(
             veth1_name,
             veth1_ip,
@@ -87,7 +89,7 @@ fn main() {
                     Events::TunnelPacket(tun.recv(&mut tun_buffer).await)
                 };
                 let wrapped_keepalive_timer = async {
-                    Events::SendKeepalive( smol::Timer::interval(Duration::from_secs(1)).next().await )
+                    Events::SendKeepalive( keepalive_timer.next().await )
                 };
 
                 match wrapped_connection_timeout
@@ -122,6 +124,7 @@ fn main() {
                         }
                     }
                     Events::SendKeepalive(_) => {
+                        info!("Sending keepalive");
                         connection_manager.greet_all_endpoints().await;
                     }
                 }
