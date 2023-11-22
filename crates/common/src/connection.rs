@@ -8,7 +8,7 @@ use smol::stream::StreamExt;
 use anyhow::Result;
 use log::warn;
 use smol::{Executor, future};
-use smol::channel::{Sender, TrySendError};
+use smol::channel::{Receiver, Sender, TryRecvError, TrySendError};
 
 #[derive(Debug, PartialEq)]
 pub enum ConnectionState {
@@ -21,6 +21,7 @@ pub enum ConnectionState {
 pub struct Connection {
     socket: UdpSocket,
     sender_channel: Sender<Vec<u8>>,
+    result_channel: Receiver<std::io::Result<usize>>,
     sender_thread: JoinHandle<()>,
 
     // TODO: Expose this connection timeout as a user configuration
@@ -32,17 +33,26 @@ pub struct Connection {
 impl Connection {
     pub fn new(socket: UdpSocket) -> Connection {
 
-        let (sender, receiver) = smol::channel::bounded::<Vec<u8>>(100);
+        let (packet_sender, packet_receiver) = smol::channel::bounded::<Vec<u8>>(1000);
+        let (result_sender, result_receiver) = smol::channel::bounded::<std::io::Result<usize>>(1000);
 
         let sender_socket = socket.clone();
         let sender_thread = thread::spawn(move || {
             let ex = Executor::new();
 
             ex.spawn(async {
-
                 loop {
-                    let bytes_to_send = receiver.recv().await.unwrap();
-                    sender_socket.send(bytes_to_send.as_slice()).await.unwrap();
+                    let bytes_to_send = packet_receiver.recv().await.unwrap();
+                    let result =  sender_socket.send(bytes_to_send.as_slice()).await;
+                    match result_sender.try_send(result) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            match e {
+                                TrySendError::Full(_) => {}
+                                TrySendError::Closed(_) => { panic!("Result channel closed!") }
+                            }
+                        }
+                    }
                 }
             }).detach();
 
@@ -52,7 +62,8 @@ impl Connection {
 
         Connection {
             socket,
-            sender_channel: sender,
+            sender_channel: packet_sender,
+            result_channel: result_receiver,
             sender_thread,
             connection_timeout: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
             state: ConnectionState::Startup,
@@ -74,23 +85,47 @@ impl Connection {
 
     pub async fn write(&self, packet: Vec<u8>) -> std::io::Result<usize> {
         //self.socket.send(&packet).await
-        let packet_length = packet.len();
         match self.sender_channel.try_send(packet) {
             Ok(()) => {
-                Ok(packet_length)
+
             }
             Err(e) => {
                 match e {
                     TrySendError::Full(_) => {
                         warn!("Send channel is full! Dropping packets on device: {}", self.socket.local_addr().unwrap());
-                        Ok(0)
                     }
                     TrySendError::Closed(_) => {
                         panic!("Sender channel closed!")
                     }
                 }
             }
+        };
+
+        // Check result_channel for socket status
+        // Be aware that we are only doing this to propagate std::io::ErrorKind::ConnectionRefused
+        // Due to async and threading, the result we read here is not necessarily the result
+        // For the packet we just submitted.
+        match self.result_channel.try_recv() {
+            Ok(socket_result) => {
+                match socket_result {
+                    Ok(bytes_sent) => {
+                        Ok(bytes_sent)
+                    }
+                    Err(e) => {
+                        Err(e)
+                    }
+                }
+            }
+            Err(e) => {
+                match e {
+                    TryRecvError::Empty => {Ok(0)}
+                    TryRecvError::Closed => {
+                        panic!("Result channel closed!")
+                    }
+                }
+            }
         }
+
     }
 
     pub async fn await_connection_timeout(&self) -> SocketAddr {
