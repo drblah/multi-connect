@@ -3,6 +3,7 @@ use crate::messages::{EndpointId, Messages, Packet};
 use futures::future::select_all;
 use smol::future::FutureExt;
 use std::collections::HashMap;
+use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
 use std::ops::AddAssign;
 use etherparse::{InternetSlice, SlicedPacket};
@@ -363,7 +364,18 @@ impl ConnectionManager {
                 if connection.state == crate::connection::ConnectionState::Connected {
 
 
-                    connection.write(encoded.clone()).await.unwrap();
+                    match connection.write(encoded.clone()).await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            match e.kind() {
+                                std::io::ErrorKind::NetworkUnreachable => {
+                                    error!("Network unreachable. Removing connection: {}", _address);
+                                    connection.state = crate::connection::ConnectionState::Disconnected;
+                                }
+                                _ => { error!("Connection encountered unhandled error: {}", e) }
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -1,3 +1,5 @@
+#![feature(io_error_more)]
+
 use nix::libc;
 use std::io::Error;
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
