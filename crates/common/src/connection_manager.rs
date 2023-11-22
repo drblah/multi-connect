@@ -153,7 +153,7 @@ impl ConnectionManager {
         ).await.unwrap();
     }
 
-    pub async fn create_new_connection(&mut self, interface_name: &str, local_address: SocketAddr, destination_address: SocketAddr, destination_endpoint_id: EndpointId) {
+    pub async fn create_new_connection(&mut self, interface_name: &str, local_address: SocketAddr, destination_address: SocketAddr, destination_endpoint_id: EndpointId) -> Result<()> {
 
         let own_ipv4 = match local_address {
             SocketAddr::V4(addr) => addr.ip().clone(),
@@ -162,7 +162,7 @@ impl ConnectionManager {
 
         let new_socket = make_socket(interface_name, Some(own_ipv4), None, true);
 
-        new_socket.connect(destination_address).await.unwrap();
+        new_socket.connect(destination_address).await?;
 
         let new_endpoint = match self.endpoints.get_mut(&destination_endpoint_id) {
             Some(endpoint) => endpoint,
@@ -176,10 +176,12 @@ impl ConnectionManager {
         let hello = Messages::Hello(messages::Hello { id: self.own_id, session_id: new_endpoint.session_id, tun_address: self.tun_address });
         let encoded = bincode::serialize(&hello).unwrap();
 
-        new_socket.send(&encoded).await.unwrap();
+        new_socket.send(&encoded).await?;
         let mut new_connection = crate::connection::Connection::new(new_socket);
         new_connection.state = crate::connection::ConnectionState::Startup;
         new_endpoint.connections.push((destination_address, new_connection));
+
+        Ok(())
     }
 
 

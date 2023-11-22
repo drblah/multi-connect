@@ -67,14 +67,14 @@ fn main() {
             veth1_ip,
             server_socket_address,
             server_endpoint_id
-        ).await;
+        ).await.unwrap();
 
         connection_manager.create_new_connection(
             veth2_name,
             veth2_ip,
             server_socket_address,
             server_endpoint_id
-        ).await;
+        ).await.unwrap();
 
         loop {
             if connection_manager.has_endpoints() {
