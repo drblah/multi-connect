@@ -1,4 +1,4 @@
-use common::{connection_manager};
+use common::{connection_manager, ConnectionInfo};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 use anyhow::Result;
@@ -16,6 +16,8 @@ enum Events {
     TunnelPacket(std::io::Result<usize>),
     SendKeepalive(Option<Instant>)
 }
+
+
 
 fn main() {
     env_logger::init();
@@ -61,6 +63,20 @@ fn main() {
         let mut connection_manager = connection_manager::ConnectionManager::new(client_socket_address, client_id, client_tun_ip);
 
         let mut keepalive_timer = smol::Timer::interval(Duration::from_secs(1));
+
+        let connection_info = vec![
+            ConnectionInfo {
+                interface_name: veth1_name.to_string(),
+                local_address: veth1_ip,
+                destination_address: server_socket_address,
+                destination_endpoint_id: server_endpoint_id
+            },
+            ConnectionInfo {
+                interface_name: veth2_name.to_string(),
+                local_address: veth2_ip,
+                destination_address: server_socket_address,
+                destination_endpoint_id: server_endpoint_id
+            }];
 
         connection_manager.create_new_connection(
             veth1_name,
@@ -126,6 +142,10 @@ fn main() {
                     Events::SendKeepalive(_) => {
                         info!("Sending keepalive");
                         connection_manager.greet_all_endpoints().await;
+
+                        // Reopen dead connections
+                        connection_manager.ensure_endpoint_connections(server_endpoint_id, &connection_info).await;
+
                     }
                 }
                 connection_manager.remove_disconnected();

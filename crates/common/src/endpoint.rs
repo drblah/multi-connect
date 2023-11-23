@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 use smol::Async;
 use smol::net::UdpSocket;
@@ -54,7 +54,9 @@ impl Endpoint {
 
             socket.connect(source_address).await?;
 
-            let new_connection = Connection::new(socket);
+            // We don't know the interface_name when we handle dynamically incoming connection
+            // TODO: Figure out if we need to handle this case
+            let new_connection = Connection::new(socket, None);
 
             self.connections.push((source_address, new_connection));
         }
@@ -118,5 +120,15 @@ impl Endpoint {
 
     pub fn has_connections(&self) -> bool {
         self.connections.len() != 0
+    }
+
+    pub fn get_alive_connections(&self) -> Vec<Option<(String, IpAddr)>> {
+        let mut alive_connections = Vec::new();
+
+        for connection in &self.connections {
+            alive_connections.push(connection.1.get_name_address_touple())
+        }
+
+        alive_connections
     }
 }

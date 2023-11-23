@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -20,6 +20,7 @@ pub enum ConnectionState {
 #[derive(Debug)]
 pub struct Connection {
     socket: UdpSocket,
+    name_address_touple: Option<(String, IpAddr)>,
     sender_channel: Sender<Vec<u8>>,
     result_channel: Receiver<std::io::Result<usize>>,
     sender_thread: JoinHandle<()>,
@@ -31,7 +32,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(socket: UdpSocket) -> Connection {
+    pub fn new(socket: UdpSocket, interface_name: Option<&str>) -> Connection {
 
         let (packet_sender, packet_receiver) = smol::channel::bounded::<Vec<u8>>(1000);
         let (result_sender, result_receiver) = smol::channel::bounded::<std::io::Result<usize>>(1000);
@@ -59,15 +60,31 @@ impl Connection {
             future::block_on(ex.run(future::pending::<()>()));
         });
 
+        let destination_ip = socket.peer_addr().unwrap().ip();
 
-        Connection {
-            socket,
-            sender_channel: packet_sender,
-            result_channel: result_receiver,
-            sender_thread,
-            connection_timeout: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
-            state: ConnectionState::Startup,
-            buffer: Mutex::new([0; 65535]),
+        if let Some(interface_name) = interface_name {
+            let interface_name = interface_name.to_string();
+            Connection {
+                socket,
+                name_address_touple: Some((interface_name, destination_ip)),
+                sender_channel: packet_sender,
+                result_channel: result_receiver,
+                sender_thread,
+                connection_timeout: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
+                state: ConnectionState::Startup,
+                buffer: Mutex::new([0; 65535]),
+            }
+        } else {
+            Connection {
+                socket,
+                name_address_touple: None,
+                sender_channel: packet_sender,
+                result_channel: result_receiver,
+                sender_thread,
+                connection_timeout: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
+                state: ConnectionState::Startup,
+                buffer: Mutex::new([0; 65535]),
+            }
         }
     }
 
@@ -133,5 +150,9 @@ impl Connection {
 
         deadline_lock.next().await;
         self.socket.peer_addr().unwrap()
+    }
+
+    pub fn get_name_address_touple(& self) -> Option<(String, IpAddr)> {
+        self.name_address_touple.clone()
     }
 }

@@ -2,11 +2,12 @@
 
 use nix::libc;
 use std::io::Error;
-use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use smol::net::UdpSocket;
 use socket2::{Domain, Socket, Type};
 use std::net::UdpSocket as std_udp;
 use smol::Async;
+use crate::messages::EndpointId;
 
 pub mod messages;
 pub mod sequencer;
@@ -80,4 +81,11 @@ fn make_socket(interface: &str, local_address: Option<Ipv4Addr>, local_port: Opt
     let udp_socket: UdpSocket = UdpSocket::from(Async::try_from(std_udp).unwrap());
 
     udp_socket
+}
+
+pub struct ConnectionInfo {
+    pub interface_name: String,
+    pub local_address: SocketAddr,
+    pub destination_address: SocketAddr,
+    pub destination_endpoint_id: EndpointId,
 }

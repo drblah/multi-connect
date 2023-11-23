@@ -3,7 +3,6 @@ use crate::messages::{EndpointId, Messages, Packet};
 use futures::future::select_all;
 use smol::future::FutureExt;
 use std::collections::HashMap;
-use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
 use std::ops::AddAssign;
 use etherparse::{InternetSlice, SlicedPacket};
@@ -11,7 +10,7 @@ use log::{error, info, warn};
 use tokio_tun::Tun;
 use uuid::Uuid;
 use crate::endpoint::Endpoint;
-use crate::{make_socket, messages};
+use crate::{ConnectionInfo, make_socket, messages};
 
 
 #[derive(Debug)]
@@ -178,7 +177,7 @@ impl ConnectionManager {
         let encoded = bincode::serialize(&hello).unwrap();
 
         new_socket.send(&encoded).await?;
-        let mut new_connection = crate::connection::Connection::new(new_socket);
+        let mut new_connection = crate::connection::Connection::new(new_socket, Some(interface_name));
         new_connection.state = crate::connection::ConnectionState::Startup;
         new_endpoint.connections.push((destination_address, new_connection));
 
@@ -215,7 +214,9 @@ impl ConnectionManager {
 
     pub async fn handle_packet_from_tun(&mut self, packet: &[u8]) {
         // Look up route based on packet destination IP
-        if let Some(endpoint_id) = self.get_route(packet) {
+        if self.routes.len() == 0 { return () }
+
+        if let Some(endpoint_id) = Some(self.routes.iter().last().unwrap().1) { // self.get_route(packet) {
             // get endpoint
             let endpoint = self.endpoints.get_mut(&endpoint_id).unwrap();
 
@@ -374,6 +375,31 @@ impl ConnectionManager {
                                 }
                                 _ => { error!("Connection encountered unhandled error: {}", e) }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
+    pub async fn ensure_endpoint_connections(&mut self, endpoint_id: EndpointId, connection_infos: &Vec<ConnectionInfo>) {
+        if let Some(endpoint) = self.endpoints.get_mut(&endpoint_id) {
+            let endpoint_alive_connections = endpoint.get_alive_connections();
+
+            for connection_info in connection_infos {
+                let connection_touple = Some((connection_info.interface_name.clone(), connection_info.destination_address.ip()));
+
+                if !endpoint_alive_connections.contains(&connection_touple) {
+                    match self.create_new_connection(
+                        &connection_info.interface_name,
+                        connection_info.local_address,
+                        connection_info.destination_address,
+                        connection_info.destination_endpoint_id
+                    ).await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("Failed to re-open connection to EP: {} - {} - {}\n{}", connection_info.destination_endpoint_id, connection_info.interface_name, connection_info.destination_address, e)
                         }
                     }
                 }
