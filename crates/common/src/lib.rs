@@ -2,10 +2,12 @@
 
 use nix::libc;
 use std::io::Error;
+use anyhow::Result;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use smol::net::UdpSocket;
 use socket2::{Domain, Socket, Type};
 use std::net::UdpSocket as std_udp;
+use log::error;
 use smol::Async;
 use crate::messages::EndpointId;
 
@@ -44,13 +46,14 @@ pub fn interface_to_ipaddr(interface: &str) -> Result<Ipv4Addr, Error> {
 /// This is useful when multiple interfaces can route to the same destination, but you want
 /// to control which interface is used. *NB*: The bind to device socket option is only supported
 /// on Linux.
-fn make_socket(interface: &str, local_address: Option<Ipv4Addr>, local_port: Option<u16>, bind_to_device: bool) -> UdpSocket {
+fn make_socket(interface: &str, local_address: Option<Ipv4Addr>, local_port: Option<u16>, bind_to_device: bool) -> Result<UdpSocket> {
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, None).unwrap();
 
     if bind_to_device {
         if let Err(err) = socket.bind_device(Some(interface.as_bytes())) {
             if matches!(err.raw_os_error(), Some(libc::ENODEV)) {
-                panic!("error binding to device (`{}`): {}", interface, err);
+                error!("error binding to device (`{}`): {}", interface, err);
+                return Err(anyhow::Error::new(err))
             } else {
                 panic!("unexpected error binding device: {}", err);
             }
@@ -73,14 +76,14 @@ fn make_socket(interface: &str, local_address: Option<Ipv4Addr>, local_port: Opt
         SocketAddrV4::new(local_address, 0)
     };
 
-    socket.bind(&address.into()).unwrap();
+    socket.bind(&address.into())?;
 
     let std_udp: std_udp = socket.into();
-    std_udp.set_nonblocking(true).unwrap();
+    std_udp.set_nonblocking(true)?;
 
-    let udp_socket: UdpSocket = UdpSocket::from(Async::try_from(std_udp).unwrap());
+    let udp_socket: UdpSocket = UdpSocket::from(Async::try_from(std_udp)?);
 
-    udp_socket
+    Ok(udp_socket)
 }
 
 pub struct ConnectionInfo {

@@ -160,7 +160,7 @@ impl ConnectionManager {
             SocketAddr::V6(_) => panic!("IPv6 not supported")
         };
 
-        let new_socket = make_socket(interface_name, Some(own_ipv4), None, true);
+        let new_socket = make_socket(interface_name, Some(own_ipv4), None, true)?;
 
         new_socket.connect(destination_address).await?;
 
