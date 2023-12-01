@@ -1,4 +1,6 @@
 #![feature(io_error_more)]
+#![feature(maybe_uninit_uninit_array)]
+#![feature(int_roundings)]
 
 use nix::libc;
 use std::io::Error;
@@ -16,6 +18,16 @@ pub mod sequencer;
 pub mod connection;
 pub mod endpoint;
 pub mod connection_manager;
+mod threaded_sender;
+mod threaded_receiver;
+
+pub struct UdpSocketInfo {
+    socket: std::net::UdpSocket,
+    socket_state: quinn_udp::UdpSocketState,
+    interface_name: String,
+    local_address: SocketAddr,
+    destination_address: SocketAddr,
+}
 
 
 pub fn interface_to_ipaddr(interface: &str) -> Result<Ipv4Addr, Error> {

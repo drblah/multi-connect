@@ -4,7 +4,8 @@ resolver = "2"
 members = [
   "crates/server",
   "crates/client",
-  "crates/common"
+  "crates/common",
+  "crates/quinn-udp",
 ]
 
 
