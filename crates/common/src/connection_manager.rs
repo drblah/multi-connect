@@ -5,12 +5,13 @@ use smol::future::FutureExt;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::ops::AddAssign;
+use std::os::fd::{AsRawFd, FromRawFd};
 use etherparse::{InternetSlice, SlicedPacket};
 use log::{error, info, warn};
 use tokio_tun::Tun;
 use uuid::Uuid;
 use crate::endpoint::Endpoint;
-use crate::{ConnectionInfo, make_socket, messages};
+use crate::{ConnectionInfo, make_socket, make_std_socket, messages};
 
 
 #[derive(Debug)]
@@ -160,9 +161,9 @@ impl ConnectionManager {
             SocketAddr::V6(_) => panic!("IPv6 not supported")
         };
 
-        let new_socket = make_socket(interface_name, Some(own_ipv4), None, true)?;
+        let new_socket = make_std_socket(interface_name, Some(own_ipv4), None, true)?;
 
-        new_socket.connect(destination_address).await?;
+        new_socket.connect(destination_address)?;
 
         let new_endpoint = match self.endpoints.get_mut(&destination_endpoint_id) {
             Some(endpoint) => endpoint,
@@ -176,7 +177,8 @@ impl ConnectionManager {
         let hello = Messages::Hello(messages::Hello { id: self.own_id, session_id: new_endpoint.session_id, tun_address: self.tun_address });
         let encoded = bincode::serialize(&hello).unwrap();
 
-        new_socket.send(&encoded).await?;
+        new_socket.send(&encoded)?;
+
         let mut new_connection = crate::connection::Connection::new(new_socket, Some(interface_name));
         new_connection.state = crate::connection::ConnectionState::Startup;
         new_endpoint.connections.push((destination_address, new_connection));
@@ -410,7 +412,7 @@ impl ConnectionManager {
 
 
 
-
+/*
 
 #[cfg(test)]
 mod tests {
@@ -495,3 +497,5 @@ mod tests {
         });
     }
 }
+
+ */

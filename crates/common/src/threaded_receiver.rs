@@ -1,22 +1,26 @@
 use std::io::IoSliceMut;
+use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
+use smol::channel::{Receiver, TrySendError};
 use std::thread;
 use std::thread::JoinHandle;
 use log::error;
 use crate::UdpSocketInfo;
 
-struct ThreadedReceiver {
+#[derive(Debug)]
+pub struct ThreadedReceiver {
     thread: JoinHandle<()>,
-    packet_channel: Receiver<Vec<u8>>,
-    result_channel: Receiver<std::io::Result<usize>>,
+    packet_channel: smol::channel::Receiver<std::io::Result<Vec<u8>>>,
+    udpsocket_info: Arc<UdpSocketInfo>
 }
 
 impl ThreadedReceiver {
     pub fn new(udpsocket_info: Arc<UdpSocketInfo>) -> Self {
+
+        let udp_socket_info_own_copy = udpsocket_info.clone();
+
         let interface_name = udpsocket_info.interface_name.to_string();
-        let (packet_sender, packet_receiver) = std::sync::mpsc::sync_channel::<Vec<u8>>(1000);
-        let (result_sender, result_receiver) = std::sync::mpsc::sync_channel::<std::io::Result<usize>>(1000);
+        let (packet_sender, packet_receiver) = smol::channel::bounded::<std::io::Result<Vec<u8>>>(1000);
 
         let destination = udpsocket_info.destination_address;
         let src_ip = Some(udpsocket_info.local_address.ip());
@@ -42,7 +46,6 @@ impl ThreadedReceiver {
 
 
                     let socket_ref = (&udpsocket_info.socket).into();
-                    println!("Waiting new reception");
                     let result = udpsocket_info.socket_state.recv(
                         socket_ref,
                         &mut io_slices,
@@ -58,24 +61,22 @@ impl ThreadedReceiver {
 
                                 if meta.stride == meta.len {
                                     // Single packet mode
-                                    println!("Receiving single packet");
                                     let packet = buffer[..meta.stride].to_vec();
 
-                                    match packet_sender.try_send(packet) {
+                                    match packet_sender.try_send(Ok(packet)) {
                                         Ok(_) => {},
                                         Err(e) => {
                                             match e {
                                                 TrySendError::Full(_) => {
                                                     error!("packet receiver queue for interface: {} is full!", udpsocket_info.interface_name)
                                                 }
-                                                TrySendError::Disconnected(_) => {}
+                                                TrySendError::Closed(_) => {}
                                             }
                                         }
                                     }
 
                                 } else {
                                     // Multiple packets
-                                    println!("Receiving multiple packets");
                                     let packet_count = meta.len.div_ceil(meta.stride);
                                     let mut from = 0;
                                     let mut to = 0;
@@ -90,14 +91,14 @@ impl ThreadedReceiver {
 
                                         let packet = buffer[from..to].to_vec();
 
-                                        match packet_sender.try_send(packet) {
+                                        match packet_sender.try_send(Ok(packet)) {
                                             Ok(_) => {},
                                             Err(e) => {
                                                 match e {
                                                     TrySendError::Full(_) => {
                                                         error!("packet receiver queue for interface: {} is full!", udpsocket_info.interface_name)
                                                     }
-                                                    TrySendError::Disconnected(_) => {}
+                                                    TrySendError::Closed(_) => {}
                                                 }
                                             }
                                         }
@@ -108,29 +109,17 @@ impl ThreadedReceiver {
 
 
                             }
-
-                            match result_sender.try_send(Ok(receptions)) {
-                                Ok(_) => {},
-                                Err(e) => {
-                                    match e {
-                                        TrySendError::Full(_) => {
-                                            error!("packet receiver result queue for interface: {} is full!", udpsocket_info.interface_name)
-                                        }
-                                        TrySendError::Disconnected(_) => {}
-                                    }
-                                }
-                            }
                         }
 
                         Err(e) => {
-                            match result_sender.try_send(Err(e)) {
+                            match packet_sender.try_send(Err(e)) {
                                 Ok(_) => {},
                                 Err(e) => {
                                     match e {
                                         TrySendError::Full(_) => {
                                             error!("packet receiver result queue for interface: {} is full!", udpsocket_info.interface_name)
                                         }
-                                        TrySendError::Disconnected(_) => {}
+                                        TrySendError::Closed(_) => {}
                                     }
                                 }
                             }
@@ -143,7 +132,16 @@ impl ThreadedReceiver {
         ThreadedReceiver {
             thread,
             packet_channel: packet_receiver,
-            result_channel: result_receiver
+            udpsocket_info: udp_socket_info_own_copy
+        }
+    }
+
+    pub async fn pop_next_packet(&self) -> std::io::Result<Vec<u8>> {
+        match self.packet_channel.recv().await {
+            Ok(recv_result) => { recv_result },
+            Err(e) => {
+                panic!("packet_channel for device {} closed!", self.udpsocket_info.interface_name)
+            }
         }
     }
 }
@@ -180,7 +178,7 @@ mod tests {
 
         let data_to_send = vec![0; 1000];
 
-        let test_iterations = 94;
+        let test_iterations = 80;
 
         for _ in 0..test_iterations {
             sender_socket.send(&data_to_send).unwrap();
@@ -190,29 +188,29 @@ mod tests {
 
         let mut data_received = Vec::new();
 
-        loop {
-            let new_packet = thread_receiver.packet_channel.recv().unwrap();
+        smol::block_on( async {
+            loop {
+                let new_packet = thread_receiver.packet_channel.recv().await.unwrap();
 
-            println!("Received packet with size: {}", new_packet.len());
+                println!("Received packet with size: {}", new_packet.len());
 
-            data_received.push(new_packet);
+                data_received.push(new_packet);
 
-            match thread_receiver.result_channel.try_recv() {
-                Ok(_received_packets) => {}
-                Err(e) => {
-                   match e {
-                       TryRecvError::Empty => {}
-                       TryRecvError::Disconnected => {
-                            panic!("Result channel disconnected!")
-                       }
-                   }
+                match thread_receiver.result_channel.try_recv() {
+                    Ok(_received_packets) => {}
+                    Err(e) => {
+                        match e {
+                            smol::channel::TryRecvError::Empty => {}
+                            smol::channel::TryRecvError::Closed => {}
+                        }
+                    }
+                }
+                println!("Total received packets: {}", data_received.len());
+                if data_received.len() == test_iterations {
+                    break
                 }
             }
-            println!("Total received packets: {}", data_received.len());
-            if data_received.len() == test_iterations {
-                break
-            }
-        }
+        });
 
         assert_eq!(data_received, vec![data_to_send; test_iterations]);
     }

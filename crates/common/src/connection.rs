@@ -1,4 +1,6 @@
+use std::io::Error;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -9,6 +11,9 @@ use anyhow::Result;
 use log::warn;
 use smol::{Executor, future};
 use smol::channel::{Receiver, Sender, TryRecvError, TrySendError};
+use crate::threaded_receiver::ThreadedReceiver;
+use crate::threaded_sender::ThreadedSender;
+use crate::UdpSocketInfo;
 
 #[derive(Debug, PartialEq)]
 pub enum ConnectionState {
@@ -19,71 +24,62 @@ pub enum ConnectionState {
 
 #[derive(Debug)]
 pub struct Connection {
-    socket: UdpSocket,
     name_address_touple: Option<(String, IpAddr)>,
-    sender_channel: Sender<Vec<u8>>,
-    result_channel: Receiver<std::io::Result<usize>>,
-    sender_thread: JoinHandle<()>,
+
+    threaded_sender: ThreadedSender,
+    threaded_receiver: ThreadedReceiver,
 
     // TODO: Expose this connection timeout as a user configuration
     connection_timeout: Mutex<smol::Timer>,
     pub state: ConnectionState,
-    buffer: Mutex<[u8; 65535]>,
+    pub udpsocket_info: Arc<UdpSocketInfo>
 }
 
 impl Connection {
-    pub fn new(socket: UdpSocket, interface_name: Option<&str>) -> Connection {
+    pub fn new(socket: std::net::UdpSocket, interface_name: Option<&str>) -> Connection {
 
-        let (packet_sender, packet_receiver) = smol::channel::bounded::<Vec<u8>>(1000);
-        let (result_sender, result_receiver) = smol::channel::bounded::<std::io::Result<usize>>(1000);
+        let if_name = if interface_name.is_some() {
+            interface_name.unwrap().to_string()
+        } else {
+            "DYNAMIC".to_string()
+        };
 
-        let sender_socket = socket.clone();
-        let sender_thread = thread::spawn(move || {
-            let ex = Executor::new();
+        let local_address = socket.local_addr().unwrap();
+        let destination_address = socket.peer_addr().unwrap();
 
-            ex.spawn(async {
-                loop {
-                    let bytes_to_send = packet_receiver.recv().await.unwrap();
-                    let result =  sender_socket.send(bytes_to_send.as_slice()).await;
-                    match result_sender.try_send(result) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            match e {
-                                TrySendError::Full(_) => {}
-                                TrySendError::Closed(_) => { panic!("Result channel closed!") }
-                            }
-                        }
-                    }
-                }
-            }).detach();
-
-            future::block_on(ex.run(future::pending::<()>()));
+        let udpsocket_info = Arc::new(UdpSocketInfo{
+            socket_state: quinn_udp::UdpSocketState::new(quinn_udp::UdpSockRef::from(&socket)).unwrap(),
+            socket,
+            interface_name: if_name,
+            local_address,
+            destination_address,
         });
 
-        let destination_ip = socket.peer_addr().unwrap().ip();
+        let threaded_sender = ThreadedSender::new(udpsocket_info.clone());
+        let threaded_receiver = ThreadedReceiver::new(udpsocket_info.clone());
 
         if let Some(interface_name) = interface_name {
             let interface_name = interface_name.to_string();
             Connection {
-                socket,
-                name_address_touple: Some((interface_name, destination_ip)),
-                sender_channel: packet_sender,
-                result_channel: result_receiver,
-                sender_thread,
+                name_address_touple: Some((interface_name, destination_address.ip())),
+
+                threaded_sender,
+                threaded_receiver,
+
                 connection_timeout: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
                 state: ConnectionState::Startup,
-                buffer: Mutex::new([0; 65535]),
+                udpsocket_info
             }
         } else {
             Connection {
-                socket,
                 name_address_touple: None,
-                sender_channel: packet_sender,
-                result_channel: result_receiver,
-                sender_thread,
+
+                threaded_sender,
+                threaded_receiver,
+
                 connection_timeout: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
                 state: ConnectionState::Startup,
-                buffer: Mutex::new([0; 65535]),
+                udpsocket_info
             }
         }
     }
@@ -94,62 +90,30 @@ impl Connection {
     }
 
     pub async fn read(&self) -> Result<(Vec<u8>, SocketAddr)> {
-        let mut buffer_lock = self.buffer.lock().await;
-        let message_length = self.socket.recv(buffer_lock.as_mut_slice()).await?;
 
-        Ok((buffer_lock[..message_length].to_vec(), self.socket.peer_addr().unwrap()))
+        let packet = self.threaded_receiver.pop_next_packet().await?;
+
+        let peer_address = self.udpsocket_info.destination_address;
+
+        Ok((packet, peer_address))
     }
 
     pub async fn write(&self, packet: Vec<u8>) -> std::io::Result<usize> {
         //self.socket.send(&packet).await
-        match self.sender_channel.try_send(packet) {
-            Ok(()) => {
-
-            }
-            Err(e) => {
-                match e {
-                    TrySendError::Full(_) => {
-                        warn!("Send channel is full! Dropping packets on device: {}", self.socket.local_addr().unwrap());
-                    }
-                    TrySendError::Closed(_) => {
-                        panic!("Sender channel closed!")
-                    }
-                }
-            }
-        };
+        self.threaded_sender.try_send(packet).await;
 
         // Check result_channel for socket status
         // Be aware that we are only doing this to propagate std::io::ErrorKind::ConnectionRefused
         // Due to async and threading, the result we read here is not necessarily the result
         // For the packet we just submitted.
-        match self.result_channel.try_recv() {
-            Ok(socket_result) => {
-                match socket_result {
-                    Ok(bytes_sent) => {
-                        Ok(bytes_sent)
-                    }
-                    Err(e) => {
-                        Err(e)
-                    }
-                }
-            }
-            Err(e) => {
-                match e {
-                    TryRecvError::Empty => {Ok(0)}
-                    TryRecvError::Closed => {
-                        panic!("Result channel closed!")
-                    }
-                }
-            }
-        }
-
+        Ok(self.threaded_sender.try_get_result().await?)
     }
 
     pub async fn await_connection_timeout(&self) -> SocketAddr {
         let mut deadline_lock = self.connection_timeout.lock().await;
 
         deadline_lock.next().await;
-        self.socket.peer_addr().unwrap()
+        self.udpsocket_info.destination_address
     }
 
     pub fn get_name_address_touple(& self) -> Option<(String, IpAddr)> {

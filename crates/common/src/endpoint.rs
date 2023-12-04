@@ -1,4 +1,5 @@
 use std::net::{IpAddr, SocketAddr};
+use std::os::fd::{AsFd, AsRawFd, FromRawFd};
 use std::time::Duration;
 use smol::Async;
 use smol::net::UdpSocket;
@@ -50,9 +51,7 @@ impl Endpoint {
             let socket = std::net::UdpSocket::from(socket);
             socket.set_nonblocking(true)?;
 
-            let socket = UdpSocket::from(Async::try_from(socket)?);
-
-            socket.connect(source_address).await?;
+            socket.connect(source_address)?;
 
             // We don't know the interface_name when we handle dynamically incoming connection
             // TODO: Figure out if we need to handle this case

@@ -21,6 +21,7 @@ pub mod connection_manager;
 mod threaded_sender;
 mod threaded_receiver;
 
+#[derive(Debug)]
 pub struct UdpSocketInfo {
     socket: std::net::UdpSocket,
     socket_state: quinn_udp::UdpSocketState,
@@ -96,6 +97,44 @@ fn make_socket(interface: &str, local_address: Option<Ipv4Addr>, local_port: Opt
     let udp_socket: UdpSocket = UdpSocket::from(Async::try_from(std_udp)?);
 
     Ok(udp_socket)
+}
+
+fn make_std_socket(interface: &str, local_address: Option<Ipv4Addr>, local_port: Option<u16>, bind_to_device: bool) -> Result<std::net::UdpSocket> {
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, None).unwrap();
+
+    if bind_to_device {
+        if let Err(err) = socket.bind_device(Some(interface.as_bytes())) {
+            if matches!(err.raw_os_error(), Some(libc::ENODEV)) {
+                error!("error binding to device (`{}`): {}", interface, err);
+                return Err(anyhow::Error::new(err))
+            } else {
+                panic!("unexpected error binding device: {}", err);
+            }
+        }
+    }
+
+
+    let local_address = match local_address {
+        Some(local_address) => {
+            local_address
+        }
+        None => {
+            interface_to_ipaddr(interface).unwrap()
+        }
+    };
+
+    let address = if local_port.is_some() {
+        SocketAddrV4::new(local_address, local_port.unwrap())
+    } else {
+        SocketAddrV4::new(local_address, 0)
+    };
+
+    socket.bind(&address.into())?;
+
+    let std_udp: std_udp = socket.into();
+    std_udp.set_nonblocking(true)?;
+
+    Ok(std_udp)
 }
 
 pub struct ConnectionInfo {
