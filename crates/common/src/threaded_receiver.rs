@@ -190,21 +190,12 @@ mod tests {
 
         smol::block_on( async {
             loop {
-                let new_packet = thread_receiver.packet_channel.recv().await.unwrap();
+                let new_packet = thread_receiver.packet_channel.recv().await.unwrap().unwrap();
 
                 println!("Received packet with size: {}", new_packet.len());
 
                 data_received.push(new_packet);
 
-                match thread_receiver.result_channel.try_recv() {
-                    Ok(_received_packets) => {}
-                    Err(e) => {
-                        match e {
-                            smol::channel::TryRecvError::Empty => {}
-                            smol::channel::TryRecvError::Closed => {}
-                        }
-                    }
-                }
                 println!("Total received packets: {}", data_received.len());
                 if data_received.len() == test_iterations {
                     break
