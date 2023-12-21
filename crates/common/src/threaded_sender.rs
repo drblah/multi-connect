@@ -9,7 +9,7 @@ use crate::UdpSocketInfo;
 #[derive(Debug)]
 pub struct ThreadedSender {
     thread: JoinHandle<()>,
-    packet_channel: smol::channel::Sender<Vec<u8>>,
+    pub(crate) packet_channel: smol::channel::Sender<Vec<u8>>,
     result_channel: smol::channel::Receiver<std::io::Result<usize>>,
     udpsocket_info: Arc<UdpSocketInfo>
 }

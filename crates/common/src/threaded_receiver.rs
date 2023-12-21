@@ -4,13 +4,14 @@ use std::sync::Arc;
 use smol::channel::{Receiver, TrySendError};
 use std::thread;
 use std::thread::JoinHandle;
+use std::time::Duration;
 use log::error;
 use crate::UdpSocketInfo;
 
 #[derive(Debug)]
 pub struct ThreadedReceiver {
     thread: JoinHandle<()>,
-    packet_channel: smol::channel::Receiver<std::io::Result<Vec<u8>>>,
+    pub(crate) packet_channel: smol::channel::Receiver<std::io::Result<Vec<u8>>>,
     udpsocket_info: Arc<UdpSocketInfo>
 }
 
@@ -30,12 +31,15 @@ impl ThreadedReceiver {
         let mut recv_buffer = [[0u8; 65535]; MAX_GRO];
         let mut meta_buffer = [quinn_udp::RecvMeta::default(); MAX_GRO];
 
+        udp_socket_info_own_copy.socket.set_nonblocking(false).unwrap();
+
         let thread = thread::Builder::new()
             .name(format!("Receiver thread: {}", interface_name))
             .spawn(move ||{
 
 
                 loop {
+
                     let mut io_slices: [IoSliceMut; MAX_GRO] = unsafe {
                         let mut slices: [std::mem::MaybeUninit<IoSliceMut>; MAX_GRO] = std::mem::MaybeUninit::uninit_array();
                         for (slice, buffer) in slices.iter_mut().zip(&mut recv_buffer) {

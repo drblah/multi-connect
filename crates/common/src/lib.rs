@@ -143,3 +143,81 @@ pub struct ConnectionInfo {
     pub destination_address: SocketAddr,
     pub destination_endpoint_id: EndpointId,
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+    use std::io::Read;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::sync::Arc;
+    use crate::threaded_receiver::ThreadedReceiver;
+    use crate::threaded_sender::ThreadedSender;
+    use crate::UdpSocketInfo;
+
+    fn create_random_vec(size: usize) -> Vec<u8> {
+        let mut vec = vec![0u8; size];
+        let mut file = File::open("/dev/urandom").expect("Failed to open /dev/urandom");
+        file.read_exact(&mut vec).expect("Failed to read bytes");
+        vec
+    }
+
+    #[test]
+    fn integration_gso_gro() {
+        let sender_socket = std::net::UdpSocket::bind("127.0.0.1:6000").unwrap();
+        let receive_socket = std::net::UdpSocket::bind("127.0.0.2:5000").unwrap();
+
+        sender_socket.connect("127.0.0.2:5000").unwrap();
+        receive_socket.connect("127.0.0.1:6000").unwrap();
+
+        let receive_socket_info = Arc::new(UdpSocketInfo {
+            socket_state: quinn_udp::UdpSocketState::new(quinn_udp::UdpSockRef::from(&sender_socket)).unwrap(),
+            socket: receive_socket,
+            interface_name: "lo".to_string(),
+            local_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 5000),
+            destination_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 6000),
+        });
+
+        let sender_socket_info = Arc::new(UdpSocketInfo {
+            socket_state: quinn_udp::UdpSocketState::new(quinn_udp::UdpSockRef::from(&sender_socket)).unwrap(),
+            socket: sender_socket,
+            interface_name: "lo".to_string(),
+            local_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 6000),
+            destination_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 5000),
+        });
+
+        let thread_receiver = ThreadedReceiver::new(receive_socket_info.clone());
+        let thread_sender = ThreadedSender::new(sender_socket_info.clone());
+
+        let data_to_send = create_random_vec(1000);;
+
+        let test_iterations = 49;
+
+        smol::block_on( async {
+            for _ in 0..test_iterations {
+                thread_sender.packet_channel.send(data_to_send.clone()).await.unwrap();
+            }
+        });
+
+
+        let mut data_received = Vec::new();
+
+        smol::block_on( async {
+            loop {
+                let new_packet = thread_receiver.packet_channel.recv().await.unwrap().unwrap();
+
+                println!("Received packet with size: {}", new_packet.len());
+
+                data_received.push(new_packet);
+
+                println!("Total received packets: {}", data_received.len());
+                if data_received.len() == test_iterations {
+                    break
+                }
+            }
+        });
+
+        assert_eq!(data_received, vec![data_to_send; test_iterations]);
+    }
+
+
+}
