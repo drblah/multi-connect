@@ -2,7 +2,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
-use log::{error, warn};
+use log::{error, info, warn};
 use smol::channel::{TryRecvError, TrySendError};
 use crate::UdpSocketInfo;
 
@@ -85,7 +85,6 @@ impl ThreadedSender {
                                     vec_to_transmit(packets_to_send, destination, src_ip, segment_size)
                                 );
                             }
-
                             let socket_ref = (&udpsocket_info.socket).into();
                             let send_result = udpsocket_info.socket_state.send(
                                 socket_ref,
@@ -98,6 +97,9 @@ impl ThreadedSender {
                                 warn!("result sender channel cannot keep up for threaded_sender: {}", udpsocket_info.interface_name)
                             }
 
+                        } else {
+                            error!("Sender thread channel closed! Terminating thread!");
+                            return ()
                         }
                     }
                 });
@@ -143,7 +145,6 @@ impl ThreadedSender {
 }
 
 fn vec_to_transmit(packets_to_send: Vec<Vec<u8>>, destination: SocketAddr, src_ip: Option<IpAddr>, segment_size: usize) -> quinn_udp::Transmit {
-
     let segment_size = if segment_size == 0 {
         None
     } else {
