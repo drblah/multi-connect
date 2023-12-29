@@ -22,3 +22,4 @@ etherparse = "0.13.0"
 pnet_datalink = "0.34.0"
 quinn-udp = { path = "../quinn-udp" }
 bytes = "1.5.0"
+polling = "3.3.1"
