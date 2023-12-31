@@ -2,7 +2,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
-use log::{error, info, warn};
+use log::{error, warn};
 use smol::channel::{TryRecvError, TrySendError};
 use crate::UdpSocketInfo;
 
@@ -39,7 +39,6 @@ impl ThreadedSender {
                             let mut was_while_run = false;
 
                             let segment_size = packet_bytes.len();
-                            let mut accumulated_bytes = packet_bytes.len();
                             packets_to_send.push(packet_bytes);
 
                             while let Ok(more_bytes) = packet_receiver.try_recv() {
@@ -63,7 +62,6 @@ impl ThreadedSender {
                                 } else if more_bytes_length < segment_size || packets_to_send.len() == 31 {
                                     was_while_run = true;
                                     // Use this segment as the last in the current transmit, then abort
-                                    accumulated_bytes += more_bytes_length;
                                     packets_to_send.push(more_bytes);
 
                                     transmits.push(
@@ -75,7 +73,6 @@ impl ThreadedSender {
                                     break
                                 } else {
                                     // Add this segment to the current transmit, then continue
-                                    accumulated_bytes += more_bytes_length;
                                     packets_to_send.push(more_bytes);
                                 }
                             }

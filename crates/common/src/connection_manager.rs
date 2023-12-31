@@ -5,13 +5,12 @@ use smol::future::FutureExt;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::ops::AddAssign;
-use std::os::fd::{AsRawFd, FromRawFd};
 use etherparse::{InternetSlice, SlicedPacket};
 use log::{error, info, warn};
 use tokio_tun::Tun;
 use uuid::Uuid;
 use crate::endpoint::Endpoint;
-use crate::{ConnectionInfo, make_socket, make_std_socket, messages};
+use crate::{ConnectionInfo, make_std_socket, messages};
 
 
 #[derive(Debug)]

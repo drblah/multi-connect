@@ -1,10 +1,8 @@
 use std::io::IoSliceMut;
-use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use smol::channel::{Receiver, TrySendError};
+use smol::channel::{TrySendError};
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::Duration;
 use log::error;
 use polling::{Event, Events, Poller};
 use crate::UdpSocketInfo;
@@ -25,9 +23,6 @@ impl ThreadedReceiver {
 
         let interface_name = udpsocket_info.interface_name.to_string();
         let (packet_sender, packet_receiver) = smol::channel::bounded::<std::io::Result<Vec<u8>>>(1000);
-
-        let destination = udpsocket_info.destination_address;
-        let src_ip = Some(udpsocket_info.local_address.ip());
 
         const MAX_GRO: usize = 1;
 
@@ -175,7 +170,7 @@ impl ThreadedReceiver {
         match self.packet_channel.recv().await {
             Ok(recv_result) => { recv_result },
             Err(e) => {
-                panic!("packet_channel for device {} closed!", self.udpsocket_info.interface_name)
+                panic!("packet_channel for device {} closed! {}", self.udpsocket_info.interface_name, e)
             }
         }
     }
@@ -190,7 +185,7 @@ impl Drop for ThreadedReceiver {
 
         self.poller.notify().unwrap();
 
-        if let Some(handle) = self.thread.take() { ;
+        if let Some(handle) = self.thread.take() {
             handle.join().unwrap();
         }
 

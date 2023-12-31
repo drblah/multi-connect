@@ -1,8 +1,5 @@
 use std::net::{IpAddr, SocketAddr};
-use std::os::fd::{AsFd, AsRawFd, FromRawFd};
 use std::time::Duration;
-use smol::Async;
-use smol::net::UdpSocket;
 use socket2::SockAddr;
 use uuid::Uuid;
 use anyhow::Result;
