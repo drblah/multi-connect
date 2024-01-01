@@ -43,12 +43,15 @@ impl Sequencer {
 
     pub async fn insert_packet(&mut self, pkt: Packet) {
         if pkt.seq >= self.next_seq {
-            if pkt.seq - self.next_seq > 3 {
-                debug!("Large sequence jump detected. Clear packet queue and insert packet");
-                self.packet_queue.clear();
-                self.packet_queue.entry(pkt.seq)
-                    .or_insert(pkt);
-                self.advance_queue().await;
+
+            if let Some(tail) = self.packet_queue.last_entry() {
+                if pkt.seq - *tail.key() > 10 {
+                    debug!("Large sequence jump detected. Clear packet queue and insert packet: from {} to {} - {}", self.next_seq, pkt.seq, pkt.seq - self.next_seq);
+                    self.packet_queue.clear();
+                    self.packet_queue.entry(pkt.seq)
+                        .or_insert(pkt);
+                    self.advance_queue().await;
+                }
             } else {
                 self.packet_queue.entry(pkt.seq)
                     .or_insert(pkt);
