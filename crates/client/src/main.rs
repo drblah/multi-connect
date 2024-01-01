@@ -108,11 +108,13 @@ fn main() {
                     Events::SendKeepalive( keepalive_timer.next().await )
                 };
 
-                match wrapped_connection_timeout
-                    .race(wrapped_packet_sorter)
-                    .race(wrapped_tunnel_device)
-                    .race(wrapped_endpoints)
-                    .race(wrapped_keepalive_timer)
+                match wrapped_keepalive_timer
+                    .or(
+                        wrapped_connection_timeout
+                        .race(wrapped_packet_sorter)
+                        .race(wrapped_tunnel_device)
+                        .race(wrapped_endpoints)
+                    )
                     .await
                 {
                     Events::NewEstablishedMessage(result) => match result {
