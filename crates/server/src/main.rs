@@ -5,8 +5,19 @@ use smol::{future::FutureExt, net, Async};
 use socket2::SockAddr;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use async_compat::Compat;
+use clap::Parser;
 use log::{error, info};
 use tokio_tun::{TunBuilder};
+
+#[derive(Parser, Debug)]
+#[clap(author, version, about)]
+struct Args {
+    /// Path to the configuration file
+    #[clap(long, action = clap::ArgAction::Set)]
+    config: String,
+}
+
+
 
 enum Events {
     NewConnection((usize, SocketAddr)),
@@ -20,6 +31,9 @@ enum Events {
 
 fn main() {
     env_logger::init();
+
+    let args = Args::parse();
+
 
     smol::block_on(Compat::new (async {
         let server_socket =
