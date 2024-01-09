@@ -8,6 +8,7 @@ use async_compat::Compat;
 use clap::Parser;
 use log::{error, info};
 use tokio_tun::{TunBuilder};
+use common::settings;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
@@ -34,12 +35,18 @@ fn main() {
 
     let args = Args::parse();
 
+    let settings: settings::ServerSettings =
+        serde_json::from_str(std::fs::read_to_string(args.config).unwrap().as_str()).unwrap();
+
+    info!("Using config: {:?}", settings);
+
+
 
     smol::block_on(Compat::new (async {
         let server_socket =
             socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None).unwrap();
         server_socket.set_reuse_address(true).unwrap();
-        let socketaddr: SocketAddr = "172.16.200.4:40000".parse().unwrap();
+        let socketaddr: SocketAddr = settings.server_bind_address; //"172.16.200.4:40000".parse().unwrap();
 
         server_socket.bind(&SockAddr::from(socketaddr)).unwrap();
 
@@ -51,7 +58,7 @@ fn main() {
         let mut udp_buffer = [0u8; 65535];
         let mut tun_buffer = [0u8; 65535];
 
-        let tun_address: IpAddr = "10.12.0.1".parse().unwrap();
+        let tun_address: IpAddr = settings.tunnel_config.tunnel_device_address;
 
         let tun_address_ipv4 = match tun_address {
             IpAddr::V4(ipv4) => ipv4,
@@ -64,16 +71,16 @@ fn main() {
             .name("")
             .tap(false)
             .packet_info(false)
-            .mtu(1424)
+            .mtu(settings.tunnel_config.mtu)
             .up()
             .address(tun_address_ipv4)
             .broadcast(Ipv4Addr::BROADCAST)
-            .netmask(Ipv4Addr::new(255, 255, 255, 0))
+            .netmask(settings.tunnel_config.netmask)
             .try_build()
             .unwrap();
 
 
-        let mut conman = ConnectionManager::new(socketaddr, 1, tun_address);
+        let mut conman = ConnectionManager::new(socketaddr, settings.peer_id, tun_address);
 
         loop {
             if conman.has_endpoints() {

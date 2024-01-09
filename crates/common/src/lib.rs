@@ -16,6 +16,7 @@ pub mod sequencer;
 pub mod connection;
 pub mod endpoint;
 pub mod connection_manager;
+pub mod settings;
 
 
 pub fn interface_to_ipaddr(interface: &str) -> Result<Ipv4Addr, Error> {
