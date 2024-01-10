@@ -1,4 +1,4 @@
-use common::{connection_manager, ConnectionInfo};
+use common::{connection_manager, ConnectionInfo, settings};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 use anyhow::Result;
@@ -29,9 +29,16 @@ enum Events {
 fn main() {
     env_logger::init();
 
+    let args = Args::parse();
+
+    let settings: settings::ClientSettings =
+        serde_json::from_str(std::fs::read_to_string(args.config).unwrap().as_str()).unwrap();
+
+    info!("Using config: {:?}", settings);
+
     smol::block_on(Compat::new(async {
 
-        let client_tun_ip = "10.12.0.5".parse().unwrap();
+        let client_tun_ip = settings.tunnel_config.tunnel_device_address; //"10.12.0.5".parse().unwrap();
 
         let client_tun_ipv4 = match client_tun_ip {
             IpAddr::V4(ipv4) => ipv4,
@@ -44,26 +51,21 @@ fn main() {
             .name("")
             .tap(false)
             .packet_info(false)
-            .mtu(1424)
+            .mtu(settings.tunnel_config.mtu)
             .up()
             .address(client_tun_ipv4)
             .broadcast(Ipv4Addr::BROADCAST)
-            .netmask(Ipv4Addr::new(255, 255, 255, 0))
+            .netmask(settings.tunnel_config.netmask)
             .try_build()
             .unwrap();
 
-        let client_socket_address = "172.16.200.2:0".parse().unwrap();
+        // TODO: Can we handle this in a more generic way?
+        let client_socket_address = settings.interfaces.first().unwrap().bind_address; //"172.16.200.2:0".parse().unwrap();
 
-        let server_socket_address = "172.16.200.4:40000".parse().unwrap();
-        let server_endpoint_id = 1;
+        let server_socket_address = settings.server_address; //"172.16.200.4:40000".parse().unwrap();
+        let server_endpoint_id = settings.server_id;
 
-        let veth1_name = "veth1";
-        let veth2_name = "veth2";
-
-        let veth1_ip = "172.16.200.2:0".parse().unwrap();
-        let veth2_ip = "172.16.200.3:0".parse().unwrap();
-
-        let client_id = 154;
+        let client_id = settings.peer_id;
 
         let mut tun_buffer = [0u8; 65535];
 
@@ -71,33 +73,23 @@ fn main() {
 
         let mut keepalive_timer = smol::Timer::interval(Duration::from_secs(1));
 
-        let connection_info = vec![
-            ConnectionInfo {
-                interface_name: veth1_name.to_string(),
-                local_address: veth1_ip,
+        let mut connection_info = Vec::new();
+
+        for interface_config in &settings.interfaces {
+            connection_info.push(ConnectionInfo {
+                interface_name: interface_config.interface_name.clone(),
+                local_address: interface_config.bind_address,
                 destination_address: server_socket_address,
                 destination_endpoint_id: server_endpoint_id
-            },
-            ConnectionInfo {
-                interface_name: veth2_name.to_string(),
-                local_address: veth2_ip,
-                destination_address: server_socket_address,
-                destination_endpoint_id: server_endpoint_id
-            }];
+            });
 
-        connection_manager.create_new_connection(
-            veth1_name,
-            veth1_ip,
-            server_socket_address,
-            server_endpoint_id
-        ).await.unwrap();
-
-        connection_manager.create_new_connection(
-            veth2_name,
-            veth2_ip,
-            server_socket_address,
-            server_endpoint_id
-        ).await.unwrap();
+            connection_manager.create_new_connection(
+                interface_config.interface_name.clone(),
+                interface_config.bind_address,
+                server_socket_address,
+                server_endpoint_id
+            ).await.unwrap()
+        }
 
         loop {
             if connection_manager.has_endpoints() {
@@ -162,19 +154,14 @@ fn main() {
             } else {
                 info!("No active connections. Awaiting new connection attempts.");
 
-                connection_manager.create_new_connection(
-                    veth1_name,
-                    veth1_ip,
-                    server_socket_address,
-                    server_endpoint_id
-                ).await;
-
-                connection_manager.create_new_connection(
-                    veth2_name,
-                    veth2_ip,
-                    server_socket_address,
-                    server_endpoint_id
-                ).await;
+                for interface_config in &settings.interfaces {
+                    connection_manager.create_new_connection(
+                        interface_config.interface_name.clone(),
+                        interface_config.bind_address,
+                        server_socket_address,
+                        server_endpoint_id
+                    ).await.unwrap()
+                }
             }
         }
     }));
