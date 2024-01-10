@@ -153,14 +153,14 @@ impl ConnectionManager {
         ).await.unwrap();
     }
 
-    pub async fn create_new_connection(&mut self, interface_name: &str, local_address: SocketAddr, destination_address: SocketAddr, destination_endpoint_id: EndpointId) -> Result<()> {
+    pub async fn create_new_connection(&mut self, interface_name: String, local_address: SocketAddr, destination_address: SocketAddr, destination_endpoint_id: EndpointId) -> Result<()> {
 
         let own_ipv4 = match local_address {
             SocketAddr::V4(addr) => addr.ip().clone(),
             SocketAddr::V6(_) => panic!("IPv6 not supported")
         };
 
-        let new_socket = make_socket(interface_name, Some(own_ipv4), None, true)?;
+        let new_socket = make_socket(&interface_name, Some(own_ipv4), None, true)?;
 
         new_socket.connect(destination_address).await?;
 
@@ -177,7 +177,7 @@ impl ConnectionManager {
         let encoded = bincode::serialize(&hello).unwrap();
 
         new_socket.send(&encoded).await?;
-        let mut new_connection = crate::connection::Connection::new(new_socket, Some(interface_name));
+        let mut new_connection = crate::connection::Connection::new(new_socket, Some(&interface_name));
         new_connection.state = crate::connection::ConnectionState::Startup;
         new_endpoint.connections.push((destination_address, new_connection));
 
@@ -392,7 +392,7 @@ impl ConnectionManager {
 
                 if !endpoint_alive_connections.contains(&connection_touple) {
                     match self.create_new_connection(
-                        &connection_info.interface_name,
+                        connection_info.interface_name.clone(),
                         connection_info.local_address,
                         connection_info.destination_address,
                         connection_info.destination_endpoint_id
