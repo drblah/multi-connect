@@ -25,7 +25,8 @@ pub struct Interface {
 pub struct ClientSettings {
     pub peer_id: u16,
     pub interfaces: Vec<Interface>,
+    pub server_id: u16,
     pub server_address: SocketAddr,
-    pub tunnel_device_address: IpAddr
+    pub tunnel_config: TunnelSettings
 }
 
