@@ -3,11 +3,20 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 use anyhow::Result;
 use async_compat::Compat;
+use clap::Parser;
 use futures::StreamExt;
 use smol::future::{FutureExt};
 use common::messages::{EndpointId};
 use log::{error, info};
 use tokio_tun::{TunBuilder};
+
+#[derive(Parser, Debug)]
+#[clap(author, version, about)]
+struct Args {
+    /// Path to the configuration file
+    #[clap(long, action = clap::ArgAction::Set)]
+    config: String,
+}
 
 enum Events {
     NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr)>),
@@ -16,8 +25,6 @@ enum Events {
     TunnelPacket(std::io::Result<usize>),
     SendKeepalive(Option<Instant>)
 }
-
-
 
 fn main() {
     env_logger::init();
