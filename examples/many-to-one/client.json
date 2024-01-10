@@ -1,0 +1,20 @@
+{
+  "peer_id": 155,
+  "interfaces": [
+    {
+      "interface_name": "veth1",
+      "bind_address": "172.16.200.2:0"
+    },
+    {
+      "interface_name": "veth2",
+      "bind_address": "172.16.200.3:0"
+    }
+  ],
+  "server_id": 1,
+  "server_address": "172.16.200.4:40000",
+  "tunnel_config": {
+    "tunnel_device_address": "10.12.0.5",
+    "netmask": "255.255.255.0",
+    "mtu": 1400
+  }
+}

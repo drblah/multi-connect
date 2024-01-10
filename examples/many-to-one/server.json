@@ -1,0 +1,9 @@
+{
+  "peer_id": 1,
+  "server_bind_address": "172.16.200.4:40000",
+  "tunnel_config": {
+    "tunnel_device_address": "10.12.0.1",
+    "netmask": "255.255.255.0",
+    "mtu": 1400
+  }
+}
