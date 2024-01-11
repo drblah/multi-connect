@@ -46,7 +46,7 @@ impl Sequencer {
 
             if let Some(tail) = self.packet_queue.last_entry() {
                 if pkt.seq - *tail.key() > 10 {
-                    debug!("Large sequence jump detected. Clear packet queue and insert packet: from {} to {} - {}", self.next_seq, pkt.seq, pkt.seq - self.next_seq);
+                    debug!("Large sequence jump detected. Clear packet queue and insert packet: from {} to {} - {}", *tail.key(), pkt.seq, pkt.seq - *tail.key());
                     self.packet_queue.clear();
                     self.packet_queue.entry(pkt.seq)
                         .or_insert(pkt);
