@@ -363,7 +363,7 @@ impl ConnectionManager {
 
             for (_address, connection) in &mut endpoint.connections {
                 if connection.state == crate::connection::ConnectionState::Connected {
-
+                    info!("Greeting on connection: {:?}", connection.get_name_address_touple());
 
                     match connection.write(encoded.clone()).await {
                         Ok(_) => {}
