@@ -6,7 +6,7 @@ use smol::lock::Mutex;
 use smol::net::UdpSocket;
 use smol::stream::StreamExt;
 use anyhow::Result;
-use log::warn;
+use log::{error, warn};
 use smol::{Executor, future};
 use smol::channel::{Receiver, Sender, TryRecvError, TrySendError};
 
@@ -39,12 +39,23 @@ impl Connection {
         let (result_sender, result_receiver) = smol::channel::bounded::<std::io::Result<usize>>(1000);
 
         let sender_socket = socket.clone();
+        let interface_name_thread_copy = if interface_name.is_some() {
+            interface_name.unwrap().to_string()
+        } else {
+            "DYNAMIC".to_string()
+        };
         let sender_thread = thread::spawn(move || {
             let ex = Executor::new();
 
             ex.spawn(async {
                 loop {
-                    let bytes_to_send = packet_receiver.recv().await.unwrap();
+                    let bytes_to_send = match packet_receiver.recv().await {
+                        Ok(bytes_to_send) => bytes_to_send,
+                        Err(e) => {
+                            error!("Failed to receive new bytes on packet_receiver channel. Interface_name: {}", interface_name_thread_copy);
+                            break
+                        }
+                    };
                     let result =  sender_socket.send(bytes_to_send.as_slice()).await;
                     match result_sender.try_send(result) {
                         Ok(_) => {}
