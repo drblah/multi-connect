@@ -23,6 +23,7 @@ pub struct Connection {
     name_address_touple: Option<(String, IpAddr)>,
     sender_channel: Sender<Vec<u8>>,
     result_channel: Receiver<std::io::Result<usize>>,
+    #[allow(dead_code)]
     sender_thread: JoinHandle<()>,
 
     // TODO: Expose this connection timeout as a user configuration
