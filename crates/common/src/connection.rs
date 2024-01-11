@@ -1,14 +1,11 @@
 use std::net::{IpAddr, SocketAddr};
-use std::thread;
-use std::thread::JoinHandle;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::time::Duration;
 use smol::lock::Mutex;
 use smol::net::UdpSocket;
 use smol::stream::StreamExt;
 use anyhow::Result;
-use log::{error, warn};
-use smol::{Executor, future};
-use smol::channel::{Receiver, Sender, TryRecvError, TrySendError};
+use log::{debug};
 
 #[derive(Debug, PartialEq)]
 pub enum ConnectionState {
@@ -20,11 +17,8 @@ pub enum ConnectionState {
 #[derive(Debug)]
 pub struct Connection {
     socket: UdpSocket,
+    std_socket: std::net::UdpSocket,
     name_address_touple: Option<(String, IpAddr)>,
-    sender_channel: Sender<Vec<u8>>,
-    result_channel: Receiver<std::io::Result<usize>>,
-    #[allow(dead_code)]
-    sender_thread: JoinHandle<()>,
 
     // TODO: Expose this connection timeout as a user configuration
     connection_timeout: Mutex<smol::Timer>,
@@ -34,54 +28,14 @@ pub struct Connection {
 
 impl Connection {
     pub fn new(socket: UdpSocket, interface_name: Option<&str>) -> Connection {
-
-        let (packet_sender, packet_receiver) = smol::channel::bounded::<Vec<u8>>(1000);
-        let (result_sender, result_receiver) = smol::channel::bounded::<std::io::Result<usize>>(1000);
-
-        let sender_socket = socket.clone();
-        let interface_name_thread_copy = if interface_name.is_some() {
-            interface_name.unwrap().to_string()
-        } else {
-            "DYNAMIC".to_string()
-        };
-        let sender_thread = thread::spawn(move || {
-            let ex = Executor::new();
-
-            ex.spawn(async {
-                loop {
-                    let bytes_to_send = match packet_receiver.recv().await {
-                        Ok(bytes_to_send) => bytes_to_send,
-                        Err(e) => {
-                            error!("Failed to receive new bytes on packet_receiver channel. Interface_name: {}, {}", interface_name_thread_copy, e);
-                            break
-                        }
-                    };
-                    let result =  sender_socket.send(bytes_to_send.as_slice()).await;
-                    match result_sender.try_send(result) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            match e {
-                                TrySendError::Full(_) => {}
-                                TrySendError::Closed(_) => { panic!("Result channel closed!") }
-                            }
-                        }
-                    }
-                }
-            }).detach();
-
-            future::block_on(ex.run(future::pending::<()>()));
-        });
-
         let destination_ip = socket.peer_addr().unwrap().ip();
-
+        let std_socket = unsafe { std::net::UdpSocket::from_raw_fd(socket.clone().as_raw_fd()) };
         if let Some(interface_name) = interface_name {
             let interface_name = interface_name.to_string();
             Connection {
                 socket,
+                std_socket,
                 name_address_touple: Some((interface_name, destination_ip)),
-                sender_channel: packet_sender,
-                result_channel: result_receiver,
-                sender_thread,
                 connection_timeout: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
                 state: ConnectionState::Startup,
                 buffer: Mutex::new([0; 65535]),
@@ -89,10 +43,8 @@ impl Connection {
         } else {
             Connection {
                 socket,
+                std_socket,
                 name_address_touple: None,
-                sender_channel: packet_sender,
-                result_channel: result_receiver,
-                sender_thread,
                 connection_timeout: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
                 state: ConnectionState::Startup,
                 buffer: Mutex::new([0; 65535]),
@@ -113,48 +65,20 @@ impl Connection {
     }
 
     pub async fn write(&self, packet: Vec<u8>) -> std::io::Result<usize> {
-        //self.socket.send(&packet).await
-        match self.sender_channel.try_send(packet) {
-            Ok(()) => {
-
-            }
+        match self.std_socket.send(&packet) {
+            Ok(send_bytes) => { Ok(send_bytes)}
             Err(e) => {
-                match e {
-                    TrySendError::Full(_) => {
-                        warn!("Send channel is full! Dropping packets on device: {}", self.socket.local_addr().unwrap());
+                match e.kind() {
+                    std::io::ErrorKind::WouldBlock => {
+                        debug!("Write call on {:?} would have blocked", self.name_address_touple);
+                        Ok(0)
                     }
-                    TrySendError::Closed(_) => {
-                        panic!("Sender channel closed!")
-                    }
-                }
-            }
-        };
-
-        // Check result_channel for socket status
-        // Be aware that we are only doing this to propagate std::io::ErrorKind::ConnectionRefused
-        // Due to async and threading, the result we read here is not necessarily the result
-        // For the packet we just submitted.
-        match self.result_channel.try_recv() {
-            Ok(socket_result) => {
-                match socket_result {
-                    Ok(bytes_sent) => {
-                        Ok(bytes_sent)
-                    }
-                    Err(e) => {
+                    _ => {
                         Err(e)
                     }
                 }
             }
-            Err(e) => {
-                match e {
-                    TryRecvError::Empty => {Ok(0)}
-                    TryRecvError::Closed => {
-                        panic!("Result channel closed!")
-                    }
-                }
-            }
         }
-
     }
 
     pub async fn await_connection_timeout(&self) -> SocketAddr {
