@@ -28,7 +28,8 @@ impl Endpoint {
             connections: Vec::new(),
             session_id,
             tx_counter: 0,
-            packet_sorter: Sequencer::new(Duration::from_secs(1)),
+            // TODO: Expose packet_sorter timeout in settings
+            packet_sorter: Sequencer::new(Duration::from_millis(5)),
         }
     }
 
