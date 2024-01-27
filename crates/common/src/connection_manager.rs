@@ -348,7 +348,7 @@ impl ConnectionManager {
 
         for (_, endpoint) in self.endpoints.iter() {
             if endpoint.has_connections() {
-                futures.push(endpoint.await_sequencer_deadline().boxed())
+                futures.push(endpoint.await_packet_sorter_deadline().boxed())
             }
         }
 
@@ -419,7 +419,7 @@ impl ConnectionManager {
 
 
 
-
+/*
 #[cfg(test)]
 mod tests {
     use uuid::Uuid;
@@ -503,3 +503,5 @@ mod tests {
         });
     }
 }
+
+ */

@@ -10,7 +10,7 @@ use futures::future::select_all;
 use log::{error, info};
 use crate::connection::{Connection, ConnectionState};
 use crate::messages::{EndpointId, HelloAck, Messages, Packet};
-use crate::sequencer::Sequencer;
+use crate::packet_sorter::PacketSorter;
 
 #[derive(Debug)]
 pub struct Endpoint {
@@ -18,7 +18,7 @@ pub struct Endpoint {
     pub session_id: Uuid,
     pub connections: Vec<(SocketAddr, Connection)>,
     pub tx_counter: u64,
-    pub packet_sorter: Sequencer
+    pub packet_sorter: PacketSorter
 }
 
 impl Endpoint {
@@ -29,7 +29,7 @@ impl Endpoint {
             session_id,
             tx_counter: 0,
             // TODO: Expose packet_sorter timeout in settings
-            packet_sorter: Sequencer::new(Duration::from_millis(5)),
+            packet_sorter: PacketSorter::new(Duration::from_millis(5)),
         }
     }
 
@@ -113,7 +113,7 @@ impl Endpoint {
         (self.id, item_resolved)
     }
 
-    pub async fn await_sequencer_deadline(&self) -> EndpointId {
+    pub async fn await_packet_sorter_deadline(&self) -> EndpointId {
         self.packet_sorter.await_deadline().await;
 
         self.id

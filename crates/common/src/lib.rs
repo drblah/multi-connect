@@ -12,7 +12,7 @@ use smol::Async;
 use crate::messages::EndpointId;
 
 pub mod messages;
-pub mod sequencer;
+pub mod packet_sorter;
 pub mod connection;
 pub mod endpoint;
 pub mod connection_manager;

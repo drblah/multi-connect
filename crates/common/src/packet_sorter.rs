@@ -7,7 +7,7 @@ use smol::stream::StreamExt;
 use crate::messages::Packet;
 
 #[derive(Debug)]
-pub struct Sequencer {
+pub struct PacketSorter {
     packet_queue: BTreeMap<u64, Packet>,
     pub next_seq: u64,
 
@@ -18,12 +18,12 @@ pub struct Sequencer {
     sorted_packet_queue_rx: smol::channel::Receiver<Packet>
 }
 
-impl Sequencer {
+impl PacketSorter {
     pub fn new(deadline: Duration) -> Self {
 
         let (sorted_packet_queue_tx, sorted_packet_queue_rx) = smol::channel::bounded(1000);
 
-        Sequencer {
+        PacketSorter {
             packet_queue: BTreeMap::new(),
             next_seq: 0,
             deadline,
@@ -53,7 +53,7 @@ impl Sequencer {
         match self.sorted_packet_queue_rx.recv().await {
             Ok(packet) => Some(packet),
             Err(e) => {
-                error!("Sequencer sorted packet queue closed!");
+                error!("Packet sorter packet queue closed!");
                 None
             }
         }
@@ -105,10 +105,10 @@ impl Sequencer {
                 Err(e) => {
                     match e {
                         TrySendError::Full(_) => {
-                            error!("Sequencer sorted queue is full! Dropping packets!")
+                            error!("Packet sorter queue is full! Dropping packets!")
                         }
                         TrySendError::Closed(_) => {
-                            error!("Sequencer sorted queue is closed!")
+                            error!("Packet sorter queue is closed!")
                         }
                     }
                 }
@@ -147,95 +147,57 @@ impl Sequencer {
         deadline_lock.next().await;
     }
 }
-/*
+
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::time::Duration;
     use crate::messages::Packet;
-    use crate::sequencer::Sequencer;
-
     #[test]
-    fn unordered_insert() {
-        let mut sequencer = Sequencer::new(Duration::from_millis(1));
-        let packets = vec![
-            Packet{
-                seq: 0,
-                id: 0,
-                bytes: Vec::new()
-            },
-            Packet {
-                seq: 3,
-                id: 0,
-                bytes: Vec::new()
-            },
-            Packet{
-                seq: 1,
-                id: 0,
-                bytes: Vec::new()
-            },
-            Packet{
-                seq: 2,
-                id: 0,
-                bytes: Vec::new()
-            }
-        ];
-        let expected = [0, 1, 2, 3];
+    fn sorter_handles_out_of_order_packets() {
+        smol::block_on(async {
+            let mut sorter = PacketSorter::new(Duration::from_secs(1));
+            let packet1 = Packet { seq: 0, id: 0, bytes: Vec::new() };
+            let packet2 = Packet { seq: 1, id: 0, bytes: Vec::new() };
 
-        for packet in packets{
-            sequencer.insert_packet(packet)
-        }
+            sorter.insert_packet(packet2.clone()).await;
+            sorter.insert_packet(packet1.clone()).await;
 
-        for expected_seq in expected {
-            let pkt = sequencer.get_next_packet().unwrap();
+            let ordered1 = sorter.get_next_packet().await;
+            let ordered2 = sorter.get_next_packet().await;
 
-            assert_eq!(pkt.seq, expected_seq)
-        }
+            assert_eq!(ordered1, Some(packet1));
+            assert_eq!(ordered2, Some(packet2));
+        });
     }
 
     #[test]
-    fn unordered_insert_duplicates() {
-        let mut sequencer = Sequencer::new(Duration::from_millis(1));
-        let packets = vec![
-            Packet {
-                seq: 0,
-                id: 0,
-                bytes: Vec::new(),
-            },
-            Packet {
-                seq: 3,
-                id: 0,
-                bytes: Vec::new(),
-            },
-            Packet {
-                seq: 3,
-                id: 0,
-                bytes: Vec::new(),
-            },
-            Packet {
-                seq: 1,
-                id: 0,
-                bytes: Vec::new(),
-            },
-            Packet {
-                seq: 2,
-                id: 0,
-                bytes: Vec::new(),
-            },
-        ];
-        let expected = [0, 1, 2, 3];
+    fn sorter_clears_queue_on_large_sequence_jump() {
+        smol::block_on(async {
+            let mut sorter = PacketSorter::new(Duration::from_secs(1));
+            let packet1 = Packet { seq: 0, id: 0, bytes: Vec::new() };
+            let packet11 = Packet { seq: 11, id: 0, bytes: Vec::new() };
 
-        for packet in packets {
-            sequencer.insert_packet(packet)
-        }
+            sorter.insert_packet(packet1.clone()).await;
+            sorter.insert_packet(packet11.clone()).await;
 
-        for expected_seq in expected {
-            let pkt = sequencer.get_next_packet().unwrap();
+            assert_eq!(sorter.get_next_packet().await, Some(packet11));
+            assert_eq!(sorter.get_queue_length(), 0);
+        });
+    }
 
-            assert_eq!(pkt.seq, expected_seq)
-        }
+    #[test]
+    fn sorter_resets_deadline_after_retrieving_packet() {
+        smol::block_on(async {
+            let mut sorter = PacketSorter::new(Duration::from_millis(10));
+            let packet1 = Packet { seq: 1, id: 0, bytes: Vec::new() };
 
-        assert_eq!(sequencer.get_queue_length(), 0);
+            sorter.insert_packet(packet1.clone()).await;
+            sorter.await_deadline().await;
+            sorter.advance_queue().await;
+            let packet = sorter.get_next_packet().await;
+
+            assert_eq!(packet, Some(packet1))
+        });
     }
 }
-
- */
