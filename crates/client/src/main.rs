@@ -7,7 +7,7 @@ use clap::Parser;
 use futures::StreamExt;
 use smol::future::{FutureExt};
 use common::messages::{EndpointId, Packet};
-use log::{error, info};
+use log::{debug, error, info};
 use tokio_tun::{TunBuilder};
 
 #[derive(Parser, Debug)]
@@ -165,12 +165,15 @@ fn main() {
                 info!("No active connections. Awaiting new connection attempts.");
 
                 for interface_config in &settings.interfaces {
-                    connection_manager.create_new_connection(
+                    match connection_manager.create_new_connection(
                         interface_config.interface_name.clone(),
                         interface_config.bind_address,
                         server_socket_address,
                         server_endpoint_id
-                    ).await.unwrap()
+                    ).await {
+                        Ok(()) => { debug!("Restarted connection on: {}", interface_config.interface_name) }
+                        Err(_) => { error!("Failed to restart connection on: {}", interface_config.interface_name) }
+                    }
                 }
             }
         }
