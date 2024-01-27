@@ -370,7 +370,7 @@ impl ConnectionManager {
             let encoded = bincode::serialize(&hello).unwrap();
 
             for (_address, connection) in &mut endpoint.connections {
-                if connection.state == crate::connection::ConnectionState::Connected {
+                if connection.state == crate::connection::ConnectionState::Connected || connection.state == crate::connection::ConnectionState::Startup {
                     info!("Greeting on connection: {:?}", connection.get_name_address_touple());
 
                     match connection.write(encoded.clone()).await {
