@@ -1,6 +1,6 @@
 use common::connection_manager::ConnectionManager;
 use anyhow::{Result};
-use common::messages::EndpointId;
+use common::messages::{EndpointId, Packet};
 use smol::{future::FutureExt, net, Async};
 use socket2::SockAddr;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -25,7 +25,8 @@ enum Events {
     NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr)>),
     ConnectionTimeout((EndpointId, SocketAddr)),
     PacketSorter(EndpointId),
-    TunnelPacket(std::io::Result<usize>)
+    TunnelPacket(std::io::Result<usize>),
+    NewSortedPacket((EndpointId, Option<Packet>))
 }
 
 
@@ -100,12 +101,16 @@ fn main() {
                 let wrapped_tunnel_device = async {
                     Events::TunnelPacket(tun_device.recv(&mut tun_buffer).await)
                 };
+                let wrapped_new_sorted_packet = async {
+                    Events::NewSortedPacket(conman.await_endpoint_sorted_packets().await)
+                };
 
                 match wrapped_server
                     .race(wrapped_endpoints)
                     .race(wrapped_connection_timeout)
                     .race(wrapped_packet_sorter)
                     .race(wrapped_tunnel_device)
+                    .race(wrapped_new_sorted_packet)
                     .await
                 {
                     Events::NewConnection((len, addr)) => {
@@ -133,6 +138,11 @@ fn main() {
                                 conman.handle_packet_from_tun(&tun_buffer[..packet_length]).await;
                             }
                             Err(e) => error!("Error while reading from tun device: {}", e.to_string())
+                        }
+                    }
+                    Events::NewSortedPacket((_endpoint_id, maybe_packet)) => {
+                        if let Some(packet) = maybe_packet {
+                            tun_device.send(packet.bytes.as_slice()).await.unwrap();
                         }
                     }
                 }

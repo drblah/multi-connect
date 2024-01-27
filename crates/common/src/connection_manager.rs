@@ -104,12 +104,6 @@ impl ConnectionManager {
                 Messages::Packet(packet) => {
                     if let Some(endpoint) = self.endpoints.get_mut(&endpoint_id) {
                         endpoint.packet_sorter.insert_packet(packet).await;
-
-                        if endpoint.packet_sorter.have_next_packet() {
-                            let packet = endpoint.packet_sorter.get_next_packet().await.unwrap();
-                            self.handle_tunnel_message(packet, endpoint_id, tun_dev).await;
-                        }
-
                     }
                 }
                 Messages::Hello(hello) => {
@@ -282,6 +276,20 @@ impl ConnectionManager {
         for (_, endpoint) in self.endpoints.iter() {
             if endpoint.has_connections() {
                 futures.push(endpoint.await_connection_timeouts().boxed())
+            }
+        }
+
+        let (item_resolved, _ready_future_index, _remaining_futures) = select_all(futures).await;
+
+        item_resolved
+    }
+
+    pub async fn await_endpoint_sorted_packets(&self) -> (EndpointId, Option<Packet>) {
+        let mut futures = Vec::new();
+
+        for (_, endpoint) in self.endpoints.iter() {
+            if endpoint.has_connections() {
+                futures.push(endpoint.await_sorted_packet().boxed())
             }
         }
 

@@ -6,7 +6,7 @@ use async_compat::Compat;
 use clap::Parser;
 use futures::StreamExt;
 use smol::future::{FutureExt};
-use common::messages::{EndpointId};
+use common::messages::{EndpointId, Packet};
 use log::{error, info};
 use tokio_tun::{TunBuilder};
 
@@ -23,7 +23,8 @@ enum Events {
     ConnectionTimeout((EndpointId, SocketAddr)),
     PacketSorter(EndpointId),
     TunnelPacket(std::io::Result<usize>),
-    SendKeepalive(Option<Instant>)
+    SendKeepalive(Option<Instant>),
+    NewSortedPacket((EndpointId, Option<Packet>))
 }
 
 fn main() {
@@ -106,6 +107,9 @@ fn main() {
                 let wrapped_keepalive_timer = async {
                     Events::SendKeepalive( keepalive_timer.next().await )
                 };
+                let wrapped_new_sorted_packet = async {
+                    Events::NewSortedPacket(connection_manager.await_endpoint_sorted_packets().await)
+                };
 
                 match wrapped_keepalive_timer
                     .or(
@@ -113,6 +117,7 @@ fn main() {
                         .race(wrapped_packet_sorter)
                         .race(wrapped_tunnel_device)
                         .race(wrapped_endpoints)
+                        .race(wrapped_new_sorted_packet)
                     )
                     .await
                 {
@@ -147,6 +152,11 @@ fn main() {
                         // Reopen dead connections
                         connection_manager.ensure_endpoint_connections(server_endpoint_id, &connection_info).await;
 
+                    }
+                    Events::NewSortedPacket((_endpoint_id, maybe_packet)) => {
+                        if let Some(packet) = maybe_packet {
+                            tun.send(packet.bytes.as_slice()).await.unwrap();
+                        }
                     }
                 }
                 connection_manager.remove_disconnected();

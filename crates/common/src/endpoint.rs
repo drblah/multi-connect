@@ -9,7 +9,7 @@ use smol::future::FutureExt;
 use futures::future::select_all;
 use log::{error, info};
 use crate::connection::{Connection, ConnectionState};
-use crate::messages::{EndpointId, HelloAck, Messages};
+use crate::messages::{EndpointId, HelloAck, Messages, Packet};
 use crate::sequencer::Sequencer;
 
 #[derive(Debug)]
@@ -116,6 +116,13 @@ impl Endpoint {
         self.packet_sorter.await_deadline().await;
 
         self.id
+    }
+
+    pub async fn await_sorted_packet(&self) -> (EndpointId, Option<Packet>) {
+        (
+            self.id,
+            self.packet_sorter.await_have_next_packet().await
+            )
     }
 
     pub fn has_connections(&self) -> bool {

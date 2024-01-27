@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 use smol::lock::Mutex;
 use std::time::{Duration};
-use log::debug;
+use log::{debug, error};
+use smol::channel::TrySendError;
 use smol::stream::StreamExt;
 use crate::messages::Packet;
 
@@ -13,15 +14,22 @@ pub struct Sequencer {
     // TODO: Expose this deadline as a user configuration
     deadline: Duration,
     deadline_timer: Mutex<smol::Timer>,
+    sorted_packet_queue_tx: smol::channel::Sender<Packet>,
+    sorted_packet_queue_rx: smol::channel::Receiver<Packet>
 }
 
 impl Sequencer {
     pub fn new(deadline: Duration) -> Self {
+
+        let (sorted_packet_queue_tx, sorted_packet_queue_rx) = smol::channel::bounded(1000);
+
         Sequencer {
             packet_queue: BTreeMap::new(),
             next_seq: 0,
             deadline,
             deadline_timer: Mutex::new(smol::Timer::after(deadline)),
+            sorted_packet_queue_tx,
+            sorted_packet_queue_rx
         }
     }
 
@@ -39,6 +47,16 @@ impl Sequencer {
         }
 
         None
+    }
+
+    pub async fn await_have_next_packet(&self) -> Option<Packet> {
+        match self.sorted_packet_queue_rx.recv().await {
+            Ok(packet) => Some(packet),
+            Err(e) => {
+                error!("Sequencer sorted packet queue closed!");
+                None
+            }
+        }
     }
 
     pub async fn insert_packet(&mut self, pkt: Packet) {
@@ -69,6 +87,8 @@ impl Sequencer {
                 },
             }
 
+            // Check if we have one or more packets and move them to the sorted packet queue
+            self.enqueue_sorted_packets().await;
 
             // Start deadline timer when we have new packets
             let mut deadline_timer_lock = self.deadline_timer.lock().await;
@@ -78,10 +98,30 @@ impl Sequencer {
         }
     }
 
+    async fn enqueue_sorted_packets(&mut self) {
+        while let Some(packet) = self.get_next_packet().await {
+            match self.sorted_packet_queue_tx.try_send(packet) {
+                Ok(_) => {}
+                Err(e) => {
+                    match e {
+                        TrySendError::Full(_) => {
+                            error!("Sequencer sorted queue is full! Dropping packets!")
+                        }
+                        TrySendError::Closed(_) => {
+                            error!("Sequencer sorted queue is closed!")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn advance_queue(&mut self) {
         if !self.packet_queue.is_empty() {
             self.next_seq = *self.packet_queue.first_entry().unwrap().key();
         }
+
+        self.enqueue_sorted_packets().await;
 
         // Disable deadline timer until we get the next packet
         let mut deadline_timer_lock = self.deadline_timer.lock().await;
