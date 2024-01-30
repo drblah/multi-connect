@@ -419,19 +419,22 @@ impl ConnectionManager {
 
 
 
-/*
+
 #[cfg(test)]
 mod tests {
     use uuid::Uuid;
-    use common::messages;
+    use crate::messages;
     use crate::connection_manager::ConnectionManager;
 
     #[test]
     fn handle_hello_from_empty() {
         smol::block_on(async {
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1);
+            let conman_tun_address = "127.0.0.1".parse().unwrap();
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address);
 
-            let hello = messages::Hello { id: 154, session_id: Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap() };
+
+            let hello_tun_address = "127.0.0.2".parse().unwrap();
+            let hello = messages::Hello { id: 154, session_id: Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(), tun_address: hello_tun_address };
 
             let hello_message = messages::Messages::Hello(hello);
             let serialized = bincode::serialize(&hello_message).unwrap();
@@ -453,11 +456,12 @@ mod tests {
                 Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
                 Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap()
             ];
-
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1);
+            let conman_tun_address = "127.0.0.1".parse().unwrap();
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address);
 
             for uuid in uuids {
-                let hello = messages::Hello { id: 154, session_id: uuid };
+                let hello_tun_address = "127.0.0.2".parse().unwrap();
+                let hello = messages::Hello { id: 154, session_id: uuid, tun_address: hello_tun_address };
 
                 let hello_message = messages::Messages::Hello(hello);
                 let serialized = bincode::serialize(&hello_message).unwrap();
@@ -482,11 +486,12 @@ mod tests {
                 Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap(),
                 Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
             ];
-
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1);
+            let conman_tun_address = "127.0.0.1".parse().unwrap();
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address);
 
             for uuid in uuids {
-                let hello = messages::Hello { id: 154, session_id: uuid };
+                let hello_tun_address = "127.0.0.2".parse().unwrap();
+                let hello = messages::Hello { id: 154, session_id: uuid, tun_address: hello_tun_address };
 
                 let hello_message = messages::Messages::Hello(hello);
                 let serialized = bincode::serialize(&hello_message).unwrap();
@@ -503,5 +508,3 @@ mod tests {
         });
     }
 }
-
- */
