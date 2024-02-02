@@ -163,11 +163,11 @@ mod tests {
             sorter.insert_packet(packet2.clone()).await;
             sorter.insert_packet(packet1.clone()).await;
 
-            let ordered1 = sorter.get_next_packet().await;
-            let ordered2 = sorter.get_next_packet().await;
+            let ordered1 = sorter.sorted_packet_queue_rx.recv().await.unwrap();
+            let ordered2 = sorter.sorted_packet_queue_rx.recv().await.unwrap();
 
-            assert_eq!(ordered1, Some(packet1));
-            assert_eq!(ordered2, Some(packet2));
+            assert_eq!(ordered1, packet1);
+            assert_eq!(ordered2, packet2);
         });
     }
 
@@ -181,23 +181,22 @@ mod tests {
             sorter.insert_packet(packet1.clone()).await;
             sorter.insert_packet(packet11.clone()).await;
 
-            assert_eq!(sorter.get_next_packet().await, Some(packet11));
-            assert_eq!(sorter.get_queue_length(), 0);
-        });
-    }
+            let first_packet = sorter.sorted_packet_queue_rx.recv().await.unwrap();
+            assert_eq!(first_packet, packet1);
 
-    #[test]
-    fn sorter_resets_deadline_after_retrieving_packet() {
-        smol::block_on(async {
-            let mut sorter = PacketSorter::new(Duration::from_millis(10));
-            let packet1 = Packet { seq: 1, id: 0, bytes: Vec::new() };
+            // seq 11 should be in the btreehashmap but not yet considered "sorted". Therefore, we should not have next packet
+            let should_be_false = sorter.have_next_packet();
+            assert_eq!(should_be_false, false);
 
-            sorter.insert_packet(packet1.clone()).await;
+            // Wait for our deadline and advance queue
             sorter.await_deadline().await;
             sorter.advance_queue().await;
-            let packet = sorter.get_next_packet().await;
 
-            assert_eq!(packet, Some(packet1))
+            // We should now have seq11
+            let eleventh_packet = sorter.sorted_packet_queue_rx.recv().await.unwrap();
+            assert_eq!(eleventh_packet, packet11);
+            //assert_eq!(sorter.get_next_packet().await, Some(packet11));
+            //assert_eq!(sorter.get_queue_length(), 0);
         });
     }
 }
