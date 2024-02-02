@@ -120,13 +120,15 @@ impl ConnectionManager {
                     if self.endpoints.contains_key(&hello_ack.id) {
                         info!("Learning route from HelloAck: {}, {}", hello_ack.id, hello_ack.tun_address);
                         self.routes.insert(hello_ack.tun_address, hello_ack.id);
-                        for (_, connection) in self.endpoints.get_mut(&hello_ack.id).unwrap().connections.iter_mut() {
-                            if connection.state == crate::connection::ConnectionState::Startup {
-                                connection.state = crate::connection::ConnectionState::Connected;
-                            }
+                        for (address, connection) in self.endpoints.get_mut(&hello_ack.id).unwrap().connections.iter_mut() {
+                            if *address == source_address {
+                                if connection.state == crate::connection::ConnectionState::Startup {
+                                    connection.state = crate::connection::ConnectionState::Connected;
+                                }
 
-                            if connection.state == crate::connection::ConnectionState::Connected {
-                                connection.reset_hello_timeout().await;
+                                if connection.state == crate::connection::ConnectionState::Connected {
+                                    connection.reset_hello_timeout().await;
+                                }
                             }
                         }
                     } else {
@@ -507,4 +509,6 @@ mod tests {
             assert_eq!(endpoints.session_id, Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap());
         });
     }
+
+
 }
