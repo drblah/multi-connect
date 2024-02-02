@@ -22,7 +22,7 @@ struct Args {
 
 enum Events {
     NewConnection((usize, SocketAddr)),
-    NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr)>),
+    NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr, Option<(String, IpAddr)>)>),
     ConnectionTimeout((EndpointId, SocketAddr)),
     PacketSorter(EndpointId),
     TunnelPacket(std::io::Result<usize>),
@@ -117,9 +117,9 @@ fn main() {
                         conman.handle_hello(udp_buffer[..len].to_vec(), addr).await;
                     }
                     Events::NewEstablishedMessage(result) => match result {
-                        Ok((endpointid, message, source_address)) => {
+                        Ok((endpointid, message, source_address, receiver_interface)) => {
                             //info!("Endpoint: {}, produced message: {:?}", endpointid, message);
-                            conman.handle_established_message(message, endpointid, source_address).await;
+                            conman.handle_established_message(message, endpointid, source_address, receiver_interface).await;
 
                         }
                         Err(e) => {

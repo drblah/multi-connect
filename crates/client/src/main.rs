@@ -19,7 +19,7 @@ struct Args {
 }
 
 enum Events {
-    NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr)>),
+    NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr, Option<(String, IpAddr)>)>),
     ConnectionTimeout((EndpointId, SocketAddr)),
     PacketSorter(EndpointId),
     TunnelPacket(std::io::Result<usize>),
@@ -122,9 +122,9 @@ fn main() {
                     .await
                 {
                     Events::NewEstablishedMessage(result) => match result {
-                        Ok((endpointid, message, source_address)) => {
+                        Ok((endpointid, message, source_address, receiver_interface)) => {
                             //info!("Endpoint: {}, produced message: {:?}", endpointid, message);
-                            connection_manager.handle_established_message(message, endpointid, source_address).await;
+                            connection_manager.handle_established_message(message, endpointid, source_address, receiver_interface).await;
 
                         }
                         Err(e) => {

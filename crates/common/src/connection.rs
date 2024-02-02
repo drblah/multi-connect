@@ -60,11 +60,11 @@ impl Connection {
         deadline_lock.set_after(Duration::from_secs(10));
     }
 
-    pub async fn read(&self) -> Result<(Vec<u8>, SocketAddr)> {
+    pub async fn read(&self) -> Result<(Vec<u8>, SocketAddr, Option<(String, IpAddr)>)> {
         let mut buffer_lock = self.buffer.lock().await;
         let message_length = self.socket.recv(buffer_lock.as_mut_slice()).await?;
 
-        Ok((buffer_lock[..message_length].to_vec(), self.peer_addr))
+        Ok((buffer_lock[..message_length].to_vec(), self.peer_addr, self.name_address_touple.clone()))
     }
 
     pub async fn write(&self, packet: Vec<u8>) -> std::io::Result<usize> {

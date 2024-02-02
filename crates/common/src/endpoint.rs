@@ -87,7 +87,7 @@ impl Endpoint {
         }
     }
 
-    pub async fn await_connections(&self) -> Result<(EndpointId, Vec<u8>, SocketAddr)> {
+    pub async fn await_connections(&self) -> Result<(EndpointId, Vec<u8>, SocketAddr, Option<(String, IpAddr)>)> {
         let mut futures = Vec::new();
 
         for (_, connection) in self.connections.iter() {
@@ -98,7 +98,7 @@ impl Endpoint {
 
         let item_resolved = item_resolved?;
 
-        Ok((self.id, item_resolved.0, item_resolved.1))
+        Ok((self.id, item_resolved.0, item_resolved.1, item_resolved.2))
     }
 
     pub async fn await_connection_timeouts(&self) -> (EndpointId, SocketAddr) {

@@ -98,7 +98,7 @@ impl ConnectionManager {
         }
     }
 
-    pub async fn handle_established_message(&mut self, message: Vec<u8>, endpoint_id: EndpointId, source_address: SocketAddr) {
+    pub async fn handle_established_message(&mut self, message: Vec<u8>, endpoint_id: EndpointId, source_address: SocketAddr, receiver_interface: Option<(String, IpAddr)>) {
         if let Ok(decoded) = bincode::deserialize::<Messages>(&message) {
             match decoded {
                 Messages::Packet(packet) => {
@@ -258,7 +258,7 @@ impl ConnectionManager {
         self.endpoints.len() != 0
     }
 
-    pub async fn await_incoming(&self) -> Result<(EndpointId, Vec<u8>, SocketAddr)> {
+    pub async fn await_incoming(&self) -> Result<(EndpointId, Vec<u8>, SocketAddr, Option<(String, IpAddr)>)> {
         let mut futures = Vec::new();
 
         for (_, endpoint) in self.endpoints.iter() {
@@ -424,9 +424,12 @@ impl ConnectionManager {
 
 #[cfg(test)]
 mod tests {
+    use std::net::SocketAddr;
     use uuid::Uuid;
+    use crate::connection::ConnectionState;
     use crate::messages;
     use crate::connection_manager::ConnectionManager;
+    use crate::messages::{HelloAck, Messages};
 
     #[test]
     fn handle_hello_from_empty() {
@@ -510,5 +513,93 @@ mod tests {
         });
     }
 
+    #[test]
+    fn connection_manager_client_single_connection() {
+        smol::block_on(async {
+            let conman_tun_address = "127.0.0.1".parse().unwrap();
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address);
 
+            let own_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
+            let server_id = 1337;
+            let server_address = "127.0.0.2:1337".parse().unwrap();
+
+            conman.create_new_connection(
+                "lo".to_string(),
+                own_address.clone(),
+                server_address,
+                server_id
+            ).await.unwrap();
+
+            let session_id = conman.endpoints.iter().next().unwrap().1.session_id;
+            let server_tun_address = "127.0.100.1".parse().unwrap();
+
+            // Make fake HelloAck messages from the server
+            let ack = HelloAck { id: server_id, session_id, tun_address: server_tun_address };
+            let ack_message = Messages::HelloAck(ack);
+
+            let serialized = bincode::serialize(&ack_message).unwrap();
+
+
+            conman.handle_established_message(
+                serialized,
+                server_id,
+                server_address,
+                Some(("lo".to_string(), own_address.ip()))
+            ).await;
+
+            // The connection should now be in connected state
+            let connection_status = &conman.endpoints.iter().next().unwrap().1.connections.first().unwrap().1.state;
+            assert_eq!(*connection_status, ConnectionState::Connected);
+
+        });
+    }
+
+    #[test]
+    fn connection_manager_client_multiple_connections() {
+        smol::block_on(async {
+            let conman_tun_address = "127.0.0.1".parse().unwrap();
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address);
+
+            let own_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
+            let server_id = 1337;
+            let server_address = "127.0.0.2:1337".parse().unwrap();
+
+            conman.create_new_connection(
+                "lo".to_string(),
+                own_address.clone(),
+                server_address,
+                server_id
+            ).await.unwrap();
+
+            conman.create_new_connection(
+                "lo".to_string(),
+                "127.0.0.5:0".parse().unwrap(),
+                server_address,
+                server_id
+            ).await.unwrap();
+
+            let session_id = conman.endpoints.iter().next().unwrap().1.session_id;
+            let server_tun_address = "127.0.100.1".parse().unwrap();
+
+            // Make fake HelloAck messages from the server
+            let ack = HelloAck { id: server_id, session_id, tun_address: server_tun_address };
+            let ack_message = Messages::HelloAck(ack);
+
+            let serialized = bincode::serialize(&ack_message).unwrap();
+
+
+            conman.handle_established_message(
+                serialized,
+                server_id,
+                server_address,
+                Some(("lo".to_string(), own_address.ip()))
+            ).await;
+
+            // The connections should now be in connected state
+
+            for (conn_addr, connection) in &conman.endpoints.iter().next().unwrap().1.connections {
+                assert_eq!(connection.state, ConnectionState::Connected)
+            }
+        });
+    }
 }
