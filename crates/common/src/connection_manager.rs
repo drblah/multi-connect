@@ -98,7 +98,7 @@ impl ConnectionManager {
         }
     }
 
-    pub async fn handle_established_message(&mut self, message: Vec<u8>, endpoint_id: EndpointId, source_address: SocketAddr, tun_dev: &mut Tun) {
+    pub async fn handle_established_message(&mut self, message: Vec<u8>, endpoint_id: EndpointId, source_address: SocketAddr) {
         if let Ok(decoded) = bincode::deserialize::<Messages>(&message) {
             match decoded {
                 Messages::Packet(packet) => {

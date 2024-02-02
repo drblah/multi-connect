@@ -124,7 +124,7 @@ fn main() {
                     Events::NewEstablishedMessage(result) => match result {
                         Ok((endpointid, message, source_address)) => {
                             //info!("Endpoint: {}, produced message: {:?}", endpointid, message);
-                            connection_manager.handle_established_message(message, endpointid, source_address, &mut tun).await;
+                            connection_manager.handle_established_message(message, endpointid, source_address).await;
 
                         }
                         Err(e) => {
