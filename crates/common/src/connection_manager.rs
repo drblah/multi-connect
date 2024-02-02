@@ -303,7 +303,7 @@ impl ConnectionManager {
     pub fn remove_connection(&mut self, id: EndpointId, address: SocketAddr) {
         if let Some(endpoint) = self.endpoints.get_mut(&id) {
             info!(
-                "Deadline exceeded. Removing Connection: {} from Endpoint: {}",
+                "Removing Connection: {} from Endpoint: {}",
                 id, address
             );
             if let Some(index) = endpoint.connections.iter().position(|(addr, _)| addr == &address) {
