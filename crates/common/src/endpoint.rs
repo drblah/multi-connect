@@ -16,7 +16,7 @@ use crate::packet_sorter::PacketSorter;
 pub struct Endpoint {
     pub id: EndpointId,
     pub session_id: Uuid,
-    pub connections: Vec<(SocketAddr, Connection)>,
+    pub connections: Vec<((String, SocketAddr), Connection)>,
     pub tx_counter: u64,
     pub packet_sorter: PacketSorter
 }
@@ -36,10 +36,12 @@ impl Endpoint {
     pub async fn add_connection(
         &mut self,
         source_address: SocketAddr,
+        interface_name: String,
         local_address: SocketAddr,
     ) -> Result<(), std::io::Error> {
         // We already know the connection, so we update the last seen time
-        if let Some((_address, connection)) = self.connections.iter_mut().find(|(address, _)| *address == source_address) {
+        // TODO: Also check on interface name
+        if let Some((_address, connection)) = self.connections.iter_mut().find(|((name, addr), _)| *addr == source_address && *name == interface_name) {
             info!("Reset hello timeout for {}", source_address);
             connection.reset_hello_timeout().await;
         } else {
@@ -59,7 +61,7 @@ impl Endpoint {
             // TODO: Figure out if we need to handle this case
             let new_connection = Connection::new(socket, None);
 
-            self.connections.push((source_address, new_connection));
+            self.connections.push(((interface_name, source_address), new_connection));
         }
 
         Ok(())
@@ -72,14 +74,14 @@ impl Endpoint {
 
         let serialized = bincode::serialize(&ack_message).unwrap();
 
-        for (address, connection) in &mut self.connections {
+        for (key, connection) in &mut self.connections {
             if connection.state == ConnectionState::Startup || connection.state == ConnectionState::Connected {
                 match connection.write(serialized.clone()).await {
                     Ok(_) => {
                         connection.state = ConnectionState::Connected;
                     }
                     Err(_) => {
-                        error!("Failed to send ACK to {}. Setting as Disconnected", address);
+                        error!("Failed to send ACK to ({}, {}). Setting as Disconnected", key.0, key.1);
                         connection.state = ConnectionState::Disconnected;
                     }
                 }
@@ -87,7 +89,7 @@ impl Endpoint {
         }
     }
 
-    pub async fn await_connections(&self) -> Result<(EndpointId, Vec<u8>, SocketAddr, Option<(String, IpAddr)>)> {
+    pub async fn await_connections(&self) -> Result<(EndpointId, Vec<u8>, SocketAddr, (String, SocketAddr))> {
         let mut futures = Vec::new();
 
         for (_, connection) in self.connections.iter() {
@@ -101,7 +103,7 @@ impl Endpoint {
         Ok((self.id, item_resolved.0, item_resolved.1, item_resolved.2))
     }
 
-    pub async fn await_connection_timeouts(&self) -> (EndpointId, SocketAddr) {
+    pub async fn await_connection_timeouts(&self) -> (EndpointId, String, SocketAddr) {
         let mut futures = Vec::new();
 
         for (_, connection) in self.connections.iter() {
@@ -110,7 +112,7 @@ impl Endpoint {
 
         let (item_resolved, _ready_future_index, _remaining_futures) = select_all(futures).await;
 
-        (self.id, item_resolved)
+        (self.id, item_resolved.1, item_resolved.0)
     }
 
     pub async fn await_packet_sorter_deadline(&self) -> EndpointId {
@@ -130,7 +132,7 @@ impl Endpoint {
         self.connections.len() != 0
     }
 
-    pub fn get_alive_connections(&self) -> Vec<Option<(String, IpAddr)>> {
+    pub fn get_alive_connections(&self) -> Vec<(String, SocketAddr)> {
         let mut alive_connections = Vec::new();
 
         for connection in &self.connections {

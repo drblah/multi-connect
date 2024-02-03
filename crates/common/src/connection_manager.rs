@@ -36,7 +36,7 @@ impl ConnectionManager {
     }
 
     /// Handles new incomming connections and keeps existing connections alive
-    pub async fn handle_hello(&mut self, message: Vec<u8>, source_address: SocketAddr) {
+    pub async fn handle_hello(&mut self, message: Vec<u8>, source_address: SocketAddr, interface_name: String) {
         if let Ok(decoded) = bincode::deserialize::<Messages>(&message) {
             info!("Hello decoded!");
             info!("{:?}", decoded);
@@ -66,7 +66,7 @@ impl ConnectionManager {
 
                     // Add connections
                     match endpoint
-                        .add_connection(source_address, self.local_address)
+                        .add_connection(source_address, interface_name, self.local_address)
                         .await
                     {
                         Ok(()) => {
@@ -98,7 +98,7 @@ impl ConnectionManager {
         }
     }
 
-    pub async fn handle_established_message(&mut self, message: Vec<u8>, endpoint_id: EndpointId, source_address: SocketAddr, receiver_interface: Option<(String, IpAddr)>) {
+    pub async fn handle_established_message(&mut self, message: Vec<u8>, endpoint_id: EndpointId, source_address: SocketAddr, receiver_interface: (String, SocketAddr)) {
         if let Ok(decoded) = bincode::deserialize::<Messages>(&message) {
             match decoded {
                 Messages::Packet(packet) => {
@@ -108,7 +108,7 @@ impl ConnectionManager {
                 }
                 Messages::Hello(hello) => {
                     if let Some(endpoint) = self.endpoints.get_mut(&hello.id) {
-                        endpoint.add_connection(source_address, self.local_address).await.unwrap();
+                        endpoint.add_connection(source_address, receiver_interface.0, self.local_address).await.unwrap();
                         endpoint.acknowledge( self.own_id, endpoint.session_id, self.tun_address).await;
                     } else {
                         error!("Received hello from unknown endpoint: {}", hello.id);
@@ -120,8 +120,8 @@ impl ConnectionManager {
                     if self.endpoints.contains_key(&hello_ack.id) {
                         info!("Learning route from HelloAck: {}, {}", hello_ack.id, hello_ack.tun_address);
                         self.routes.insert(hello_ack.tun_address, hello_ack.id);
-                        for (address, connection) in self.endpoints.get_mut(&hello_ack.id).unwrap().connections.iter_mut() {
-                            if *address == source_address {
+                        for (key, connection) in self.endpoints.get_mut(&hello_ack.id).unwrap().connections.iter_mut() {
+                            if key.1 == source_address && *key.0 == receiver_interface.0 {
                                 if connection.state == crate::connection::ConnectionState::Startup {
                                     connection.state = crate::connection::ConnectionState::Connected;
                                 }
@@ -173,9 +173,9 @@ impl ConnectionManager {
         let encoded = bincode::serialize(&hello).unwrap();
 
         new_socket.send(&encoded).await?;
-        let mut new_connection = crate::connection::Connection::new(new_socket, Some(&interface_name));
+        let mut new_connection = crate::connection::Connection::new(new_socket, Some(interface_name.clone()));
         new_connection.state = crate::connection::ConnectionState::Startup;
-        new_endpoint.connections.push((destination_address, new_connection));
+        new_endpoint.connections.push(((interface_name, destination_address), new_connection));
 
         Ok(())
     }
@@ -229,7 +229,7 @@ impl ConnectionManager {
 
 
             // Send to endpoint
-            for (address, connection) in &mut endpoint.connections {
+            for (key, connection) in &mut endpoint.connections {
                 match connection.write(serialized_pakcet.clone()).await {
                     Ok(_len) => {
                         continue
@@ -237,7 +237,7 @@ impl ConnectionManager {
                     Err(e) => {
                         match e.kind() {
                             std::io::ErrorKind::ConnectionRefused => {
-                                error!("Connection refused. Removing connection: {}", address);
+                                error!("Connection refused. Removing connection: {}, {}", key.0, key.1);
                                 connection.state = crate::connection::ConnectionState::Disconnected;
                             }
                             _ => {
@@ -258,7 +258,7 @@ impl ConnectionManager {
         self.endpoints.len() != 0
     }
 
-    pub async fn await_incoming(&self) -> Result<(EndpointId, Vec<u8>, SocketAddr, Option<(String, IpAddr)>)> {
+    pub async fn await_incoming(&self) -> Result<(EndpointId, Vec<u8>, SocketAddr, (String, SocketAddr))> {
         let mut futures = Vec::new();
 
         for (_, endpoint) in self.endpoints.iter() {
@@ -272,7 +272,7 @@ impl ConnectionManager {
         Ok(item_resolved?)
     }
 
-    pub async fn await_timeout(&self) -> (EndpointId, SocketAddr) {
+    pub async fn await_timeout(&self) -> (EndpointId, String, SocketAddr) {
         let mut futures = Vec::new();
 
         for (_, endpoint) in self.endpoints.iter() {
@@ -300,13 +300,13 @@ impl ConnectionManager {
         item_resolved
     }
 
-    pub fn remove_connection(&mut self, id: EndpointId, address: SocketAddr) {
+    pub fn remove_connection(&mut self, id: EndpointId, interface_name: String, address: SocketAddr) {
         if let Some(endpoint) = self.endpoints.get_mut(&id) {
             info!(
                 "Removing Connection: {} from Endpoint: {}",
                 id, address
             );
-            if let Some(index) = endpoint.connections.iter().position(|(addr, _)| addr == &address) {
+            if let Some(index) = endpoint.connections.iter().position(|(key, _)| key.0 == interface_name && key.1 == address ) {
                 endpoint.connections.remove(index);
             }
         }
@@ -340,8 +340,8 @@ impl ConnectionManager {
             }
         }
 
-        for (endpoint_id, address) in to_be_removed {
-            self.remove_connection(endpoint_id, address)
+        for (endpoint_id, (interface_name, address)) in to_be_removed {
+            self.remove_connection(endpoint_id, interface_name, address)
         }
     }
 
@@ -371,7 +371,7 @@ impl ConnectionManager {
             let hello = Messages::Hello(messages::Hello { id: self.own_id, session_id: endpoint.session_id, tun_address: self.tun_address });
             let encoded = bincode::serialize(&hello).unwrap();
 
-            for (_address, connection) in &mut endpoint.connections {
+            for (_key, connection) in &mut endpoint.connections {
                 if connection.state == crate::connection::ConnectionState::Connected || connection.state == crate::connection::ConnectionState::Startup {
                     info!("Greeting on connection: {:?}", connection.get_name_address_touple());
 
@@ -380,7 +380,7 @@ impl ConnectionManager {
                         Err(e) => {
                             match e.kind() {
                                 std::io::ErrorKind::NetworkUnreachable => {
-                                    error!("Network unreachable. Removing connection: {}", _address);
+                                    error!("Network unreachable. Removing connection: {}, {}", _key.0, _key.1);
                                     connection.state = crate::connection::ConnectionState::Disconnected;
                                 }
                                 _ => { error!("Connection encountered unhandled error: {}", e) }
@@ -398,7 +398,7 @@ impl ConnectionManager {
             let endpoint_alive_connections = endpoint.get_alive_connections();
 
             for connection_info in connection_infos {
-                let connection_touple = Some((connection_info.interface_name.clone(), connection_info.destination_address.ip()));
+                let connection_touple = (connection_info.interface_name.clone(), connection_info.destination_address);
 
                 if !endpoint_alive_connections.contains(&connection_touple) {
                     match self.create_new_connection(
@@ -443,8 +443,9 @@ mod tests {
 
             let hello_message = messages::Messages::Hello(hello);
             let serialized = bincode::serialize(&hello_message).unwrap();
+            let server_interface_name = "DYN-interface".to_string();
 
-            conman.handle_hello(serialized, "127.0.0.2:123".parse().unwrap()).await;
+            conman.handle_hello(serialized, "127.0.0.2:123".parse().unwrap(), server_interface_name.clone()).await;
 
             assert!(conman.has_endpoints());
             assert_eq!(conman.endpoints.len(), 1);
@@ -464,6 +465,8 @@ mod tests {
             let conman_tun_address = "127.0.0.1".parse().unwrap();
             let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address);
 
+            let server_interface_name = "DYN-interface".to_string();
+
             for uuid in uuids {
                 let hello_tun_address = "127.0.0.2".parse().unwrap();
                 let hello = messages::Hello { id: 154, session_id: uuid, tun_address: hello_tun_address };
@@ -471,7 +474,7 @@ mod tests {
                 let hello_message = messages::Messages::Hello(hello);
                 let serialized = bincode::serialize(&hello_message).unwrap();
 
-                conman.handle_hello(serialized, "127.0.0.2:123".parse().unwrap()).await;
+                conman.handle_hello(serialized, "127.0.0.2:123".parse().unwrap(), server_interface_name.clone()).await;
             }
 
             assert!(conman.has_endpoints());
@@ -493,6 +496,7 @@ mod tests {
             ];
             let conman_tun_address = "127.0.0.1".parse().unwrap();
             let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address);
+            let server_interface_name = "DYN-interface".to_string();
 
             for uuid in uuids {
                 let hello_tun_address = "127.0.0.2".parse().unwrap();
@@ -501,7 +505,7 @@ mod tests {
                 let hello_message = messages::Messages::Hello(hello);
                 let serialized = bincode::serialize(&hello_message).unwrap();
 
-                conman.handle_hello(serialized, "127.0.0.2:123".parse().unwrap()).await;
+                conman.handle_hello(serialized, "127.0.0.2:123".parse().unwrap(), server_interface_name.clone()).await;
             }
 
             assert!(conman.has_endpoints());
@@ -544,7 +548,7 @@ mod tests {
                 serialized,
                 server_id,
                 server_address,
-                Some(("lo".to_string(), own_address.ip()))
+                ("lo".to_string(), own_address)
             ).await;
 
             // The connection should now be in connected state
@@ -592,7 +596,7 @@ mod tests {
                 serialized,
                 server_id,
                 server_address,
-                Some(("lo".to_string(), own_address.ip()))
+                ("lo".to_string(), own_address)
             ).await;
 
             // The connections should now be in connected state

@@ -22,8 +22,8 @@ struct Args {
 
 enum Events {
     NewConnection((usize, SocketAddr)),
-    NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr, Option<(String, IpAddr)>)>),
-    ConnectionTimeout((EndpointId, SocketAddr)),
+    NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr, (String, SocketAddr))>),
+    ConnectionTimeout((EndpointId, String, SocketAddr)),
     PacketSorter(EndpointId),
     TunnelPacket(std::io::Result<usize>),
     NewSortedPacket((EndpointId, Option<Packet>))
@@ -67,6 +67,8 @@ fn main() {
                 panic!("Tun address is not an IPv4 address: {}", ipv6)
             }
         };
+
+        let server_interface_name = "DYN-interface".to_string();
 
         let mut tun_device = TunBuilder::new()
             .name("")
@@ -114,7 +116,7 @@ fn main() {
                     .await
                 {
                     Events::NewConnection((len, addr)) => {
-                        conman.handle_hello(udp_buffer[..len].to_vec(), addr).await;
+                        conman.handle_hello(udp_buffer[..len].to_vec(), addr, server_interface_name.clone()).await;
                     }
                     Events::NewEstablishedMessage(result) => match result {
                         Ok((endpointid, message, source_address, receiver_interface)) => {
@@ -126,8 +128,8 @@ fn main() {
                             error!("Encountered error: {}", e.to_string())
                         }
                     },
-                    Events::ConnectionTimeout((endpoint, socket)) => {
-                        conman.remove_connection(endpoint, socket)
+                    Events::ConnectionTimeout((endpoint, interface_name, socket)) => {
+                        conman.remove_connection(endpoint, interface_name, socket)
                     }
                     Events::PacketSorter(endpoint_id) => {
                         conman.handle_packet_sorter_deadline(endpoint_id).await;
@@ -160,7 +162,7 @@ fn main() {
 
                 match wrapped_server.await {
                     Events::NewConnection((len, addr)) => {
-                        conman.handle_hello(udp_buffer[..len].to_vec(), addr).await;
+                        conman.handle_hello(udp_buffer[..len].to_vec(), addr, server_interface_name.clone()).await;
                     }
                     _ => continue,
                 }

@@ -18,7 +18,8 @@ pub enum ConnectionState {
 pub struct Connection {
     socket: UdpSocket,
     std_socket: std::net::UdpSocket,
-    name_address_touple: Option<(String, IpAddr)>,
+    interface_name: Option<String>,
+    local_address: SocketAddr,
 
     // TODO: Expose this connection timeout as a user configuration
     connection_timeout: Mutex<smol::Timer>,
@@ -28,30 +29,20 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(socket: UdpSocket, interface_name: Option<&str>) -> Connection {
+    pub fn new(socket: UdpSocket, interface_name: Option<String>) -> Connection {
         let destination_socket_addr = socket.peer_addr().unwrap();
         let std_socket = unsafe { std::net::UdpSocket::from_raw_fd(socket.clone().as_raw_fd()) };
-        if let Some(interface_name) = interface_name {
-            let interface_name = interface_name.to_string();
-            Connection {
-                socket,
-                std_socket,
-                name_address_touple: Some((interface_name, destination_socket_addr.ip())),
-                connection_timeout: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
-                state: ConnectionState::Startup,
-                buffer: Mutex::new([0; 65535]),
-                peer_addr: destination_socket_addr
-            }
-        } else {
-            Connection {
-                socket,
-                std_socket,
-                name_address_touple: None,
-                connection_timeout: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
-                state: ConnectionState::Startup,
-                buffer: Mutex::new([0; 65535]),
-                peer_addr: destination_socket_addr
-            }
+        let local_address = std_socket.local_addr().unwrap();
+
+        Connection {
+            socket,
+            std_socket,
+            interface_name,
+            local_address,
+            connection_timeout: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
+            state: ConnectionState::Startup,
+            buffer: Mutex::new([0; 65535]),
+            peer_addr: destination_socket_addr
         }
     }
 
@@ -60,11 +51,11 @@ impl Connection {
         deadline_lock.set_after(Duration::from_secs(10));
     }
 
-    pub async fn read(&self) -> Result<(Vec<u8>, SocketAddr, Option<(String, IpAddr)>)> {
+    pub async fn read(&self) -> Result<(Vec<u8>, SocketAddr, (String, SocketAddr))> {
         let mut buffer_lock = self.buffer.lock().await;
         let message_length = self.socket.recv(buffer_lock.as_mut_slice()).await?;
 
-        Ok((buffer_lock[..message_length].to_vec(), self.peer_addr, self.name_address_touple.clone()))
+        Ok((buffer_lock[..message_length].to_vec(), self.peer_addr, self.get_name_address_touple()))
     }
 
     pub async fn write(&self, packet: Vec<u8>) -> std::io::Result<usize> {
@@ -73,7 +64,7 @@ impl Connection {
             Err(e) => {
                 match e.kind() {
                     std::io::ErrorKind::WouldBlock => {
-                        debug!("Write call on {:?} would have blocked", self.name_address_touple);
+                        debug!("Write call on {:?} would have blocked", self.get_name_address_touple());
                         Ok(0)
                     }
                     _ => {
@@ -84,14 +75,33 @@ impl Connection {
         }
     }
 
-    pub async fn await_connection_timeout(&self) -> SocketAddr {
+    pub async fn await_connection_timeout(&self) -> (SocketAddr, String) {
         let mut deadline_lock = self.connection_timeout.lock().await;
 
         deadline_lock.next().await;
-        self.peer_addr
+
+        let interface_name = if self.interface_name.is_some() {
+            self.interface_name.clone().unwrap()
+        } else {
+            "DYN-interface".to_string()
+        };
+
+        (self.peer_addr, interface_name)
     }
 
-    pub fn get_name_address_touple(& self) -> Option<(String, IpAddr)> {
-        self.name_address_touple.clone()
+    pub fn get_name_address_touple(& self) -> (String, SocketAddr) {
+        if self.interface_name.is_some() {
+            (self.interface_name.clone().unwrap(), self.peer_addr)
+        } else {
+            ("DYN-interface".to_string(), self.peer_addr)
+        }
+    }
+
+    pub fn get_interface_name(&self) -> String {
+        if self.interface_name.is_some() {
+            self.interface_name.clone().unwrap()
+        } else {
+            "DYN-interface".to_string()
+        }
     }
 }

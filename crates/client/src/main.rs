@@ -19,8 +19,8 @@ struct Args {
 }
 
 enum Events {
-    NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr, Option<(String, IpAddr)>)>),
-    ConnectionTimeout((EndpointId, SocketAddr)),
+    NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr, (String, SocketAddr))>),
+    ConnectionTimeout((EndpointId, String, SocketAddr)),
     PacketSorter(EndpointId),
     TunnelPacket(std::io::Result<usize>),
     SendKeepalive(Option<Instant>),
@@ -131,8 +131,8 @@ fn main() {
                             error!("Encountered error: {}", e.to_string())
                         }
                     },
-                    Events::ConnectionTimeout((endpoint, socket)) => {
-                        connection_manager.remove_connection(endpoint, socket)
+                    Events::ConnectionTimeout((endpoint, interface_name, socket)) => {
+                        connection_manager.remove_connection(endpoint, interface_name, socket)
                     }
                     Events::PacketSorter(endpoint_id) => {
                         connection_manager.handle_packet_sorter_deadline(endpoint_id).await;
