@@ -64,9 +64,9 @@ impl PacketSorter {
             match self.packet_queue.last_entry() {
                 Some(tail) => {
                     match pkt.seq.checked_sub(*tail.key()) {
-                        Some(diff) if diff > 10 => {
+                        Some(diff) if diff > 100 => {
                             debug!("Large sequence jump detected. Clear packet queue and insert packet: from {} to {} - {}", *tail.key(), pkt.seq, pkt.seq - *tail.key());
-                            self.packet_queue.clear();
+                            //self.packet_queue.clear();
                             self.packet_queue.entry(pkt.seq)
                                 .or_insert(pkt);
                             self.advance_queue().await;
@@ -119,13 +119,22 @@ impl PacketSorter {
     pub async fn advance_queue(&mut self) {
         if !self.packet_queue.is_empty() {
             self.next_seq = *self.packet_queue.first_entry().unwrap().key();
+
+            self.enqueue_sorted_packets().await;
+
+            if self.packet_queue.is_empty() {
+                let mut deadline_timer_lock = self.deadline_timer.lock().await;
+                *deadline_timer_lock = smol::Timer::never();
+            } else {
+                let mut deadline_timer_lock = self.deadline_timer.lock().await;
+                deadline_timer_lock.set_after(self.deadline)
+            }
+
+        } else {
+            // Disable deadline timer until we get the next packet
+            let mut deadline_timer_lock = self.deadline_timer.lock().await;
+            *deadline_timer_lock = smol::Timer::never();
         }
-
-        self.enqueue_sorted_packets().await;
-
-        // Disable deadline timer until we get the next packet
-        let mut deadline_timer_lock = self.deadline_timer.lock().await;
-        *deadline_timer_lock = smol::Timer::never();
     }
 
     pub fn get_queue_length(&self) -> usize {

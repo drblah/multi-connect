@@ -29,7 +29,7 @@ impl Endpoint {
             session_id,
             tx_counter: 0,
             // TODO: Expose packet_sorter timeout in settings
-            packet_sorter: PacketSorter::new(Duration::from_millis(5)),
+            packet_sorter: PacketSorter::new(Duration::from_millis(100)),
         }
     }
 
