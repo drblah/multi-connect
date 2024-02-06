@@ -16,14 +16,16 @@ pub struct Packet {
 pub struct Hello {
     pub id: EndpointId,
     pub session_id: Uuid,
-    pub tun_address: IpAddr
+    pub tun_address: IpAddr,
+    pub hello_seq: u64
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct HelloAck {
     pub id: EndpointId,
     pub session_id: Uuid,
-    pub tun_address: IpAddr
+    pub tun_address: IpAddr,
+    pub hello_ack_seq: u64
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]

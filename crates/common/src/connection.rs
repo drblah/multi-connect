@@ -1,4 +1,4 @@
-use std::net::{IpAddr, SocketAddr};
+use std::net::{SocketAddr};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::time::Duration;
 use smol::lock::Mutex;

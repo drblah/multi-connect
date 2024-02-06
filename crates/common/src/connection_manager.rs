@@ -2,15 +2,16 @@ use anyhow::Result;
 use crate::messages::{EndpointId, Messages, Packet};
 use futures::future::select_all;
 use smol::future::FutureExt;
-use std::collections::HashMap;
+use std::collections::{HashMap};
 use std::net::{IpAddr, SocketAddr};
 use std::ops::AddAssign;
 use etherparse::{InternetSlice, SlicedPacket};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use tokio_tun::Tun;
 use uuid::Uuid;
 use crate::endpoint::Endpoint;
 use crate::{ConnectionInfo, make_socket, messages};
+use crate::path_latency::PathLatency;
 
 
 #[derive(Debug)]
@@ -20,7 +21,7 @@ pub struct ConnectionManager {
     pub own_id: EndpointId,
     session_history: Vec<Uuid>,
     routes: HashMap<IpAddr, EndpointId>,
-    pub tun_address: IpAddr
+    pub tun_address: IpAddr,
 }
 
 impl ConnectionManager {
@@ -31,7 +32,7 @@ impl ConnectionManager {
             own_id,
             session_history: Vec::new(),
             routes: HashMap::new(),
-            tun_address
+            tun_address,
         }
     }
 
@@ -108,8 +109,10 @@ impl ConnectionManager {
                 }
                 Messages::Hello(hello) => {
                     if let Some(endpoint) = self.endpoints.get_mut(&hello.id) {
+                        endpoint.hello_path_latency.insert_new_timestamp(hello.hello_seq);
                         endpoint.add_connection(source_address, receiver_interface.0, self.local_address).await.unwrap();
                         endpoint.acknowledge( self.own_id, endpoint.session_id, self.tun_address).await;
+                        debug!("Hello latency-diff: {:.2} - Hello-ack latency-diff: {:.2}", endpoint.hello_path_latency.estimate_path_delay_difference().as_millis(), endpoint.hello_ack_path_latency.estimate_path_delay_difference().as_millis())
                     } else {
                         error!("Received hello from unknown endpoint: {}", hello.id);
                     }
@@ -118,6 +121,11 @@ impl ConnectionManager {
                     info!("Received HelloAck: {:?}", hello_ack);
                     info!("Endpoints: {:?}", self.endpoints.keys());
                     if self.endpoints.contains_key(&hello_ack.id) {
+                        {
+                            let mut endpoint = self.endpoints.get_mut(&hello_ack.id).unwrap();
+                            endpoint.hello_ack_path_latency.insert_new_timestamp(hello_ack.hello_ack_seq);
+                            debug!("Hello latency-diff: {:.2} - Hello-ack latency-diff: {:.2}", endpoint.hello_path_latency.estimate_path_delay_difference().as_millis(), endpoint.hello_ack_path_latency.estimate_path_delay_difference().as_millis())
+                        }
                         info!("Learning route from HelloAck: {}, {}", hello_ack.id, hello_ack.tun_address);
                         self.routes.insert(hello_ack.tun_address, hello_ack.id);
                         for (key, connection) in self.endpoints.get_mut(&hello_ack.id).unwrap().connections.iter_mut() {
@@ -131,6 +139,7 @@ impl ConnectionManager {
                                 }
                             }
                         }
+
                     } else {
                         error!("Received HelloAck from unknown endpoint: {}", hello_ack.id);
                     }
@@ -169,7 +178,8 @@ impl ConnectionManager {
             }
         };
 
-        let hello = Messages::Hello(messages::Hello { id: self.own_id, session_id: new_endpoint.session_id, tun_address: self.tun_address });
+        let hello = Messages::Hello(messages::Hello { id: self.own_id, session_id: new_endpoint.session_id, tun_address: self.tun_address, hello_seq: new_endpoint.hello_counter });
+        new_endpoint.hello_counter.add_assign(1);
         let encoded = bincode::serialize(&hello).unwrap();
 
         new_socket.send(&encoded).await?;
@@ -368,7 +378,8 @@ impl ConnectionManager {
 
     pub async fn greet_all_endpoints(&mut self) {
         for (_endpoint_id, endpoint) in &mut self.endpoints {
-            let hello = Messages::Hello(messages::Hello { id: self.own_id, session_id: endpoint.session_id, tun_address: self.tun_address });
+            let hello = Messages::Hello(messages::Hello { id: self.own_id, session_id: endpoint.session_id, tun_address: self.tun_address, hello_seq: endpoint.hello_counter });
+            endpoint.hello_counter.add_assign(1);
             let encoded = bincode::serialize(&hello).unwrap();
 
             for (_key, connection) in &mut endpoint.connections {
@@ -439,7 +450,7 @@ mod tests {
 
 
             let hello_tun_address = "127.0.0.2".parse().unwrap();
-            let hello = messages::Hello { id: 154, session_id: Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(), tun_address: hello_tun_address };
+            let hello = messages::Hello { id: 154, session_id: Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(), tun_address: hello_tun_address, hello_seq: 0 };
 
             let hello_message = messages::Messages::Hello(hello);
             let serialized = bincode::serialize(&hello_message).unwrap();
@@ -469,7 +480,7 @@ mod tests {
 
             for uuid in uuids {
                 let hello_tun_address = "127.0.0.2".parse().unwrap();
-                let hello = messages::Hello { id: 154, session_id: uuid, tun_address: hello_tun_address };
+                let hello = messages::Hello { id: 154, session_id: uuid, tun_address: hello_tun_address, hello_seq: 0 };
 
                 let hello_message = messages::Messages::Hello(hello);
                 let serialized = bincode::serialize(&hello_message).unwrap();
@@ -500,7 +511,7 @@ mod tests {
 
             for uuid in uuids {
                 let hello_tun_address = "127.0.0.2".parse().unwrap();
-                let hello = messages::Hello { id: 154, session_id: uuid, tun_address: hello_tun_address };
+                let hello = messages::Hello { id: 154, session_id: uuid, tun_address: hello_tun_address, hello_seq: 0 };
 
                 let hello_message = messages::Messages::Hello(hello);
                 let serialized = bincode::serialize(&hello_message).unwrap();
@@ -538,7 +549,7 @@ mod tests {
             let server_tun_address = "127.0.100.1".parse().unwrap();
 
             // Make fake HelloAck messages from the server
-            let ack = HelloAck { id: server_id, session_id, tun_address: server_tun_address };
+            let ack = HelloAck { id: server_id, session_id, tun_address: server_tun_address, hello_ack_seq: 0 };
             let ack_message = Messages::HelloAck(ack);
 
             let serialized = bincode::serialize(&ack_message).unwrap();
@@ -586,7 +597,7 @@ mod tests {
             let server_tun_address = "127.0.100.1".parse().unwrap();
 
             // Make fake HelloAck messages from the server
-            let ack = HelloAck { id: server_id, session_id, tun_address: server_tun_address };
+            let ack = HelloAck { id: server_id, session_id, tun_address: server_tun_address, hello_ack_seq: 0 };
             let ack_message = Messages::HelloAck(ack);
 
             let serialized = bincode::serialize(&ack_message).unwrap();

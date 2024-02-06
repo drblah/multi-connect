@@ -1,4 +1,5 @@
-use std::net::{IpAddr, SocketAddr};
+use std::net::{SocketAddr};
+use std::ops::AddAssign;
 use std::time::Duration;
 use smol::Async;
 use smol::net::UdpSocket;
@@ -11,6 +12,7 @@ use log::{error, info};
 use crate::connection::{Connection, ConnectionState};
 use crate::messages::{EndpointId, HelloAck, Messages, Packet};
 use crate::packet_sorter::PacketSorter;
+use crate::path_latency::PathLatency;
 
 #[derive(Debug)]
 pub struct Endpoint {
@@ -18,7 +20,11 @@ pub struct Endpoint {
     pub session_id: Uuid,
     pub connections: Vec<((String, SocketAddr), Connection)>,
     pub tx_counter: u64,
-    pub packet_sorter: PacketSorter
+    pub hello_counter: u64,
+    pub hello_ack_counter:u64,
+    pub packet_sorter: PacketSorter,
+    pub hello_path_latency: PathLatency,
+    pub hello_ack_path_latency: PathLatency
 }
 
 impl Endpoint {
@@ -28,8 +34,12 @@ impl Endpoint {
             connections: Vec::new(),
             session_id,
             tx_counter: 0,
+            hello_counter: 0,
+            hello_ack_counter: 0,
             // TODO: Expose packet_sorter timeout in settings
             packet_sorter: PacketSorter::new(Duration::from_millis(100)),
+            hello_path_latency: PathLatency::new(),
+            hello_ack_path_latency: PathLatency::new()
         }
     }
 
@@ -69,7 +79,8 @@ impl Endpoint {
 
     pub async fn acknowledge(&mut self, own_id: EndpointId, session_id: Uuid, tun_address: std::net::IpAddr) {
         // Return ACK
-        let ack = HelloAck { id: own_id, session_id, tun_address };
+        let ack = HelloAck { id: own_id, session_id, tun_address, hello_ack_seq: self.hello_ack_counter };
+        self.hello_ack_counter.add_assign(1);
         let ack_message = Messages::HelloAck(ack);
 
         let serialized = bincode::serialize(&ack_message).unwrap();
