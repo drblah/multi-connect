@@ -152,4 +152,14 @@ impl Endpoint {
 
         alive_connections
     }
+
+    pub fn update_deadline(&mut self) {
+        let hello_path_latency_diff = self.hello_path_latency.estimate_path_delay_difference();
+        let hello_ack_path_latency_diff = self.hello_ack_path_latency.estimate_path_delay_difference();
+
+
+        let deadline = hello_path_latency_diff.max(hello_ack_path_latency_diff) * 2;
+
+        self.packet_sorter.set_deadline(deadline)
+    }
 }

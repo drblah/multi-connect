@@ -155,6 +155,10 @@ impl PacketSorter {
 
         deadline_lock.next().await;
     }
+
+    pub fn set_deadline(&mut self, new_deadline: Duration) {
+        self.deadline = new_deadline
+    }
 }
 
 #[cfg(test)]
