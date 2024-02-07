@@ -1,5 +1,7 @@
 #![feature(io_error_more)]
 
+extern crate core;
+
 use nix::libc;
 use std::io::Error;
 use anyhow::Result;
@@ -18,6 +20,7 @@ pub mod endpoint;
 pub mod connection_manager;
 pub mod settings;
 mod path_latency;
+pub mod router;
 
 
 pub fn interface_to_ipaddr(interface: &str) -> Result<Ipv4Addr, Error> {

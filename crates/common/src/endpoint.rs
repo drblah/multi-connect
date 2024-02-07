@@ -13,6 +13,7 @@ use crate::connection::{Connection, ConnectionState};
 use crate::messages::{EndpointId, HelloAck, Messages, Packet};
 use crate::packet_sorter::PacketSorter;
 use crate::path_latency::PathLatency;
+use crate::router::Address;
 
 #[derive(Debug)]
 pub struct Endpoint {
@@ -77,9 +78,9 @@ impl Endpoint {
         Ok(())
     }
 
-    pub async fn acknowledge(&mut self, own_id: EndpointId, session_id: Uuid, tun_address: std::net::IpAddr) {
+    pub async fn acknowledge(&mut self, own_id: EndpointId, session_id: Uuid, own_static_routes: &Option<Vec<Address>>) {
         // Return ACK
-        let ack = HelloAck { id: own_id, session_id, tun_address, hello_ack_seq: self.hello_ack_counter };
+        let ack = HelloAck { id: own_id, session_id, static_routes: own_static_routes.clone(), hello_ack_seq: self.hello_ack_counter };
         self.hello_ack_counter.add_assign(1);
         let ack_message = Messages::HelloAck(ack);
 

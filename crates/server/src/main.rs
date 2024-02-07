@@ -76,14 +76,23 @@ fn main() {
             .packet_info(false)
             .mtu(settings.tunnel_config.mtu)
             .up()
-            .address(tun_address_ipv4)
+            .address(tun_address_ipv4.clone())
             .broadcast(Ipv4Addr::BROADCAST)
-            .netmask(settings.tunnel_config.netmask)
+            .netmask(settings.tunnel_config.netmask.clone())
             .try_build()
             .unwrap();
 
+        let default_route = Some(vec![
+            common::router::Address {
+            address: Ipv4Addr::new(0 ,0, 0, 0),
+            subnet_mask: Ipv4Addr::new(0, 0, 0, 0), },
 
-        let mut conman = ConnectionManager::new(socketaddr, settings.peer_id, tun_address);
+            common::router::Address {
+                address: tun_address_ipv4,
+                subnet_mask: settings.tunnel_config.netmask, }
+        ]);
+
+        let mut conman = ConnectionManager::new(socketaddr, settings.peer_id, tun_address, default_route);
 
         loop {
             if conman.has_endpoints() {

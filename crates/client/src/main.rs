@@ -9,6 +9,7 @@ use smol::future::{FutureExt};
 use common::messages::{EndpointId, Packet};
 use log::{debug, error, info};
 use tokio_tun::{TunBuilder};
+use common::router::Address;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
@@ -54,9 +55,9 @@ fn main() {
             .packet_info(false)
             .mtu(settings.tunnel_config.mtu)
             .up()
-            .address(client_tun_ipv4)
+            .address(client_tun_ipv4.clone())
             .broadcast(Ipv4Addr::BROADCAST)
-            .netmask(settings.tunnel_config.netmask)
+            .netmask(settings.tunnel_config.netmask.clone())
             .try_build()
             .unwrap();
 
@@ -70,7 +71,25 @@ fn main() {
 
         let mut tun_buffer = [0u8; 65535];
 
-        let mut connection_manager = connection_manager::ConnectionManager::new(client_socket_address, client_id, client_tun_ip);
+        let mut static_routes = Vec::new();
+        for route in &settings.static_routes {
+            static_routes.push(
+                Address {
+                    address: route.address,
+                    subnet_mask: route.subnet_mask,
+                }
+            )
+        }
+
+        static_routes.push(
+            common::router::Address {
+                address: client_tun_ipv4,
+                subnet_mask: settings.tunnel_config.netmask, }
+        );
+
+        let static_routes = Some(static_routes);
+
+        let mut connection_manager = connection_manager::ConnectionManager::new(client_socket_address, client_id, client_tun_ip, static_routes);
 
         let mut keepalive_timer = smol::Timer::interval(Duration::from_secs(1));
 

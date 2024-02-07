@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::endpoint::Endpoint;
 use crate::{ConnectionInfo, make_socket, messages};
 use crate::path_latency::PathLatency;
+use crate::router::{Address, Router};
 
 
 #[derive(Debug)]
@@ -20,19 +21,21 @@ pub struct ConnectionManager {
     local_address: SocketAddr,
     pub own_id: EndpointId,
     session_history: Vec<Uuid>,
-    routes: HashMap<IpAddr, EndpointId>,
+    routes: Router,
     pub tun_address: IpAddr,
+    own_static_routes: Option<Vec<Address>>
 }
 
 impl ConnectionManager {
-    pub fn new(local_address: SocketAddr, own_id: EndpointId, tun_address: IpAddr) -> ConnectionManager {
+    pub fn new(local_address: SocketAddr, own_id: EndpointId, tun_address: IpAddr, own_static_routes: Option<Vec<Address>>) -> ConnectionManager {
         ConnectionManager {
             endpoints: HashMap::new(),
             local_address,
             own_id,
             session_history: Vec::new(),
-            routes: HashMap::new(),
+            routes: Router::new(),
             tun_address,
+            own_static_routes
         }
     }
 
@@ -76,7 +79,7 @@ impl ConnectionManager {
                                 source_address, decoded.id
                             );
 
-                            endpoint.acknowledge(self.own_id, endpoint.session_id, self.tun_address).await
+                            endpoint.acknowledge(self.own_id, endpoint.session_id, &self.own_static_routes).await
                         }
                         Err(e) => {
                             error!(
@@ -88,10 +91,14 @@ impl ConnectionManager {
                         }
                     }
 
-                    endpoint.acknowledge(self.own_id, endpoint.session_id, self.tun_address).await;
+                    endpoint.acknowledge(self.own_id, endpoint.session_id, &self.own_static_routes).await;
 
                     // Add route
-                    self.routes.insert(decoded.tun_address, decoded.id);
+                    if let Some(new_static_routes) = decoded.static_routes {
+                        for route in new_static_routes {
+                            self.routes.insert_route(route, decoded.id)
+                        }
+                    }
                 }
             }
         } else {
@@ -111,7 +118,7 @@ impl ConnectionManager {
                     if let Some(endpoint) = self.endpoints.get_mut(&hello.id) {
                         endpoint.hello_path_latency.insert_new_timestamp(hello.hello_seq);
                         endpoint.add_connection(source_address, receiver_interface.0, self.local_address).await.unwrap();
-                        endpoint.acknowledge( self.own_id, endpoint.session_id, self.tun_address).await;
+                        endpoint.acknowledge( self.own_id, endpoint.session_id, &self.own_static_routes).await;
                         debug!("Hello latency-diff: {:.2} - Hello-ack latency-diff: {:.2}", endpoint.hello_path_latency.estimate_path_delay_difference().as_millis(), endpoint.hello_ack_path_latency.estimate_path_delay_difference().as_millis())
                     } else {
                         error!("Received hello from unknown endpoint: {}", hello.id);
@@ -126,8 +133,13 @@ impl ConnectionManager {
                             endpoint.hello_ack_path_latency.insert_new_timestamp(hello_ack.hello_ack_seq);
                             debug!("Hello latency-diff: {:.2} - Hello-ack latency-diff: {:.2}", endpoint.hello_path_latency.estimate_path_delay_difference().as_millis(), endpoint.hello_ack_path_latency.estimate_path_delay_difference().as_millis())
                         }
-                        info!("Learning route from HelloAck: {}, {}", hello_ack.id, hello_ack.tun_address);
-                        self.routes.insert(hello_ack.tun_address, hello_ack.id);
+
+                        if let Some(new_routes) = hello_ack.static_routes {
+                            for route in new_routes {
+                                self.routes.insert_route(route, hello_ack.id)
+                            }
+                        }
+
                         for (key, connection) in self.endpoints.get_mut(&hello_ack.id).unwrap().connections.iter_mut() {
                             if key.1 == source_address && *key.0 == receiver_interface.0 {
                                 if connection.state == crate::connection::ConnectionState::Startup {
@@ -178,7 +190,7 @@ impl ConnectionManager {
             }
         };
 
-        let hello = Messages::Hello(messages::Hello { id: self.own_id, session_id: new_endpoint.session_id, tun_address: self.tun_address, hello_seq: new_endpoint.hello_counter });
+        let hello = Messages::Hello(messages::Hello { id: self.own_id, session_id: new_endpoint.session_id, static_routes: self.own_static_routes.clone(), hello_seq: new_endpoint.hello_counter });
         new_endpoint.hello_counter.add_assign(1);
         let encoded = bincode::serialize(&hello).unwrap();
 
@@ -191,7 +203,7 @@ impl ConnectionManager {
     }
 
 
-    fn get_route(&self, packet_bytes: &[u8]) -> Option<EndpointId> {
+    fn get_route(&self, packet_bytes: &[u8]) -> Option<Vec<EndpointId>> {
         match SlicedPacket::from_ip(packet_bytes) {
             Err(e) => {
                 error!("Error learning tun_ip: {}", e);
@@ -201,8 +213,8 @@ impl ConnectionManager {
             Ok(ip_packet) => {
                 match ip_packet.ip {
                     Some(InternetSlice::Ipv4(ipheader, ..)) => {
-                        let ipv4 = IpAddr::V4(ipheader.destination_addr());
-                        return self.routes.get(&ipv4).cloned();
+                        let ipv4 =  ipheader.destination_addr();
+                        return Some(self.routes.lookup(&ipv4))
 
                     }
                     Some(InternetSlice::Ipv6(_, _)) => {
@@ -220,45 +232,44 @@ impl ConnectionManager {
 
     pub async fn handle_packet_from_tun(&mut self, packet: &[u8]) {
         // Look up route based on packet destination IP
-        if self.routes.len() == 0 { return () }
+        if let Some(endpoint_ids) = self.get_route(packet) {
+            for endpoint_id in endpoint_ids {
 
-        if let Some(endpoint_id) = Some(self.routes.iter().last().unwrap().1) { // self.get_route(packet) {
-            // get endpoint
-            let endpoint = self.endpoints.get_mut(&endpoint_id).unwrap();
+                // get endpoint
+                let endpoint = self.endpoints.get_mut(&endpoint_id).unwrap();
 
-            // Encapsulate packet in messages::Packet
-            let packet = Packet {
-                seq: endpoint.tx_counter,
-                id: endpoint.id,
-                bytes: packet.to_vec(),
-            };
+                // Encapsulate packet in messages::Packet
+                let packet = Packet {
+                    seq: endpoint.tx_counter,
+                    id: endpoint.id,
+                    bytes: packet.to_vec(),
+                };
 
-            let serialized_pakcet = bincode::serialize(&Messages::Packet(packet)).unwrap();
+                let serialized_pakcet = bincode::serialize(&Messages::Packet(packet)).unwrap();
 
-            endpoint.tx_counter.add_assign(1);
+                endpoint.tx_counter.add_assign(1);
 
 
-            // Send to endpoint
-            for (key, connection) in &mut endpoint.connections {
-                match connection.write(serialized_pakcet.clone()).await {
-                    Ok(_len) => {
-                        continue
-                    }
-                    Err(e) => {
-                        match e.kind() {
-                            std::io::ErrorKind::ConnectionRefused => {
-                                error!("Connection refused. Removing connection: {}, {}", key.0, key.1);
-                                connection.state = crate::connection::ConnectionState::Disconnected;
+                // Send to endpoint
+                for (key, connection) in &mut endpoint.connections {
+                    match connection.write(serialized_pakcet.clone()).await {
+                        Ok(_len) => {
+                            continue
+                        }
+                        Err(e) => {
+                            match e.kind() {
+                                std::io::ErrorKind::ConnectionRefused => {
+                                    error!("Connection refused. Removing connection: {}, {}", key.0, key.1);
+                                    connection.state = crate::connection::ConnectionState::Disconnected;
+                                }
+                                _ => {
+                                    error!("Error while writing to socket: {}", e.to_string());
+                                }
                             }
-                            _ => {
-                                error!("Error while writing to socket: {}", e.to_string());
-                            }
-
                         }
                     }
                 }
             }
-
         } else {
             warn!("No route found for packet. Dropping packet");
         }
@@ -335,7 +346,7 @@ impl ConnectionManager {
             self.endpoints.remove(&id).unwrap();
 
             // Iterate self.routes and remove where the key is equal to id
-            self.routes.retain(|_key, value| value != &id)
+            self.routes.remove_route_to_endpoint(id)
         }
     }
 
@@ -378,7 +389,7 @@ impl ConnectionManager {
 
     pub async fn greet_all_endpoints(&mut self) {
         for (_endpoint_id, endpoint) in &mut self.endpoints {
-            let hello = Messages::Hello(messages::Hello { id: self.own_id, session_id: endpoint.session_id, tun_address: self.tun_address, hello_seq: endpoint.hello_counter });
+            let hello = Messages::Hello(messages::Hello { id: self.own_id, session_id: endpoint.session_id, static_routes: self.own_static_routes.clone(), hello_seq: endpoint.hello_counter });
             endpoint.hello_counter.add_assign(1);
             let encoded = bincode::serialize(&hello).unwrap();
 
@@ -446,11 +457,11 @@ mod tests {
     fn handle_hello_from_empty() {
         smol::block_on(async {
             let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address);
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None);
 
 
-            let hello_tun_address = "127.0.0.2".parse().unwrap();
-            let hello = messages::Hello { id: 154, session_id: Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(), tun_address: hello_tun_address, hello_seq: 0 };
+            //let hello_tun_address = "127.0.0.2".parse().unwrap();
+            let hello = messages::Hello { id: 154, session_id: Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(), static_routes: conman.own_static_routes.clone(), hello_seq: 0 };
 
             let hello_message = messages::Messages::Hello(hello);
             let serialized = bincode::serialize(&hello_message).unwrap();
@@ -474,13 +485,13 @@ mod tests {
                 Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap()
             ];
             let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address);
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None);
 
             let server_interface_name = "DYN-interface".to_string();
 
             for uuid in uuids {
-                let hello_tun_address = "127.0.0.2".parse().unwrap();
-                let hello = messages::Hello { id: 154, session_id: uuid, tun_address: hello_tun_address, hello_seq: 0 };
+                //let hello_tun_address = "127.0.0.2".parse().unwrap();
+                let hello = messages::Hello { id: 154, session_id: uuid, static_routes: conman.own_static_routes.clone(), hello_seq: 0 };
 
                 let hello_message = messages::Messages::Hello(hello);
                 let serialized = bincode::serialize(&hello_message).unwrap();
@@ -506,12 +517,12 @@ mod tests {
                 Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
             ];
             let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address);
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None);
             let server_interface_name = "DYN-interface".to_string();
 
             for uuid in uuids {
-                let hello_tun_address = "127.0.0.2".parse().unwrap();
-                let hello = messages::Hello { id: 154, session_id: uuid, tun_address: hello_tun_address, hello_seq: 0 };
+                //let hello_tun_address = "127.0.0.2".parse().unwrap();
+                let hello = messages::Hello { id: 154, session_id: uuid, static_routes: conman.own_static_routes.clone(), hello_seq: 0 };
 
                 let hello_message = messages::Messages::Hello(hello);
                 let serialized = bincode::serialize(&hello_message).unwrap();
@@ -532,7 +543,7 @@ mod tests {
     fn connection_manager_client_single_connection() {
         smol::block_on(async {
             let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address);
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None);
 
             let own_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
             let server_id = 1337;
@@ -546,10 +557,10 @@ mod tests {
             ).await.unwrap();
 
             let session_id = conman.endpoints.iter().next().unwrap().1.session_id;
-            let server_tun_address = "127.0.100.1".parse().unwrap();
+            //let server_tun_address = "127.0.100.1".parse().unwrap();
 
             // Make fake HelloAck messages from the server
-            let ack = HelloAck { id: server_id, session_id, tun_address: server_tun_address, hello_ack_seq: 0 };
+            let ack = HelloAck { id: server_id, session_id, static_routes: conman.own_static_routes.clone(), hello_ack_seq: 0 };
             let ack_message = Messages::HelloAck(ack);
 
             let serialized = bincode::serialize(&ack_message).unwrap();
@@ -573,7 +584,7 @@ mod tests {
     fn connection_manager_client_multiple_connections() {
         smol::block_on(async {
             let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address);
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None);
 
             let own_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
             let server_id = 1337;
@@ -594,10 +605,10 @@ mod tests {
             ).await.unwrap();
 
             let session_id = conman.endpoints.iter().next().unwrap().1.session_id;
-            let server_tun_address = "127.0.100.1".parse().unwrap();
+            //let server_tun_address = "127.0.100.1".parse().unwrap();
 
             // Make fake HelloAck messages from the server
-            let ack = HelloAck { id: server_id, session_id, tun_address: server_tun_address, hello_ack_seq: 0 };
+            let ack = HelloAck { id: server_id, session_id, static_routes: conman.own_static_routes.clone(), hello_ack_seq: 0 };
             let ack_message = Messages::HelloAck(ack);
 
             let serialized = bincode::serialize(&ack_message).unwrap();

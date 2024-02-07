@@ -16,5 +16,11 @@
     "tunnel_device_address": "10.12.0.5",
     "netmask": "255.255.255.0",
     "mtu": 1400
-  }
+  },
+  "static_routes": [
+    {
+      "address": "10.100.0.0",
+      "subnet_mask": "255.255.255.0"
+    }
+  ]
 }
