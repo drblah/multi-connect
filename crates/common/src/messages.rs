@@ -1,4 +1,3 @@
-use std::net::IpAddr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use crate::router::Address;

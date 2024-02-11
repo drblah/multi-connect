@@ -11,7 +11,6 @@ use tokio_tun::Tun;
 use uuid::Uuid;
 use crate::endpoint::Endpoint;
 use crate::{ConnectionInfo, make_socket, messages};
-use crate::path_latency::PathLatency;
 use crate::router::{Address, Router};
 
 
@@ -129,7 +128,7 @@ impl ConnectionManager {
                     info!("Endpoints: {:?}", self.endpoints.keys());
                     if self.endpoints.contains_key(&hello_ack.id) {
                         {
-                            let mut endpoint = self.endpoints.get_mut(&hello_ack.id).unwrap();
+                            let endpoint = self.endpoints.get_mut(&hello_ack.id).unwrap();
                             endpoint.hello_ack_path_latency.insert_new_timestamp(hello_ack.hello_ack_seq);
                             debug!("Hello latency-diff: {:.2} - Hello-ack latency-diff: {:.2}", endpoint.hello_path_latency.estimate_path_delay_difference().as_millis(), endpoint.hello_ack_path_latency.estimate_path_delay_difference().as_millis())
                         }

@@ -70,7 +70,7 @@ fn main() {
 
         let server_interface_name = "DYN-interface".to_string();
 
-        let mut tun_device = TunBuilder::new()
+        let tun_device = TunBuilder::new()
             .name("")
             .tap(false)
             .packet_info(false)

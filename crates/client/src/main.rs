@@ -24,6 +24,7 @@ enum Events {
     ConnectionTimeout((EndpointId, String, SocketAddr)),
     PacketSorter(EndpointId),
     TunnelPacket(std::io::Result<usize>),
+    #[allow(dead_code)]
     SendKeepalive(Option<Instant>),
     NewSortedPacket((EndpointId, Option<Packet>))
 }
@@ -49,7 +50,7 @@ fn main() {
             }
         };
 
-        let mut tun = TunBuilder::new()
+        let tun = TunBuilder::new()
             .name("")
             .tap(false)
             .packet_info(false)

@@ -19,6 +19,7 @@ pub struct Connection {
     socket: UdpSocket,
     std_socket: std::net::UdpSocket,
     interface_name: Option<String>,
+    #[allow(dead_code)]
     local_address: SocketAddr,
 
     // TODO: Expose this connection timeout as a user configuration

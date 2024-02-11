@@ -52,8 +52,8 @@ impl PacketSorter {
     pub async fn await_have_next_packet(&self) -> Option<Packet> {
         match self.sorted_packet_queue_rx.recv().await {
             Ok(packet) => Some(packet),
-            Err(e) => {
-                error!("Packet sorter packet queue closed!");
+            Err(_e) => {
+                error!("Packet sorter packet queue closed!, {}", _e);
                 None
             }
         }
