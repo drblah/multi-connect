@@ -4,12 +4,12 @@ use serde::{Deserialize, Serialize};
 use crate::messages::EndpointId;
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct Address {
+pub struct Route {
     pub address: Ipv4Addr,
     pub subnet_mask: Ipv4Addr
 }
 
-impl Address {
+impl Route {
     fn reachable_from(&self, address_to_test: &Ipv4Addr) -> bool {
 
         return if self.calculate_network_address() == (address_to_test & self.subnet_mask) {
@@ -17,24 +17,6 @@ impl Address {
         } else {
             false
         }
-
-
-        /*
-        return if self.subnet_mask == address_to_test.subnet_mask {
-            if self.calculate_network_address() == address_to_test.calculate_network_address() {
-                true
-            } else {
-                false
-            }
-        } else {
-            if (self.calculate_network_address() & address_to_test.calculate_network_address()) == address_to_test.calculate_network_address() {
-                true
-            } else {
-                false
-            }
-        }
-
-         */
     }
 
     fn calculate_network_address(&self) -> Ipv4Addr {
@@ -44,7 +26,7 @@ impl Address {
 
 #[derive(PartialEq, Debug)]
 struct AddressEndpointMapping {
-    address: Address,
+    address: Route,
     endpoint_id: EndpointId
 }
 
@@ -58,7 +40,7 @@ impl Router {
         Router { routes: Vec::new() }
     }
 
-    pub fn insert_route(&mut self, address: Address, endpoint_id: EndpointId) {
+    pub fn insert_route(&mut self, address: Route, endpoint_id: EndpointId) {
         debug!("Learning about ep: {} - {:?}", endpoint_id, address);
         let aem = AddressEndpointMapping {
             address,
@@ -112,7 +94,7 @@ mod tests {
 
     #[test]
     fn address_is_in_subnet() {
-        let a = Address {
+        let a = Route {
             address: Ipv4Addr::new(192, 168, 0, 1),
             subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
         };
@@ -124,7 +106,7 @@ mod tests {
 
     #[test]
     fn address_is_in_subnet_wider_mask() {
-        let a = Address {
+        let a = Route {
             address: Ipv4Addr::new(192, 168, 0, 1),
             subnet_mask: Ipv4Addr::new(255, 255, 0, 0),
         };
@@ -136,7 +118,7 @@ mod tests {
 
     #[test]
     fn address_is_in_subnet_wider_mask2() {
-        let a = Address {
+        let a = Route {
             address: Ipv4Addr::new(192, 168, 100, 1),
             subnet_mask: Ipv4Addr::new(255, 255, 0, 0),
         };
@@ -148,7 +130,7 @@ mod tests {
 
     #[test]
     fn address_is_not_in_subnet() {
-        let a = Address {
+        let a = Route {
             address: Ipv4Addr::new(192, 168, 0, 1),
             subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
         };
@@ -161,7 +143,7 @@ mod tests {
     #[test]
     fn insert_route_adds_new_route() {
         let mut router = Router { routes: Vec::new() };
-        let address = Address {
+        let address = Route {
             address: Ipv4Addr::new(192, 168, 0, 1),
             subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
         };
@@ -175,7 +157,7 @@ mod tests {
     #[test]
     fn insert_route_does_not_add_duplicate_route() {
         let mut router = Router { routes: Vec::new() };
-        let address = Address {
+        let address = Route {
             address: Ipv4Addr::new(192, 168, 0, 1),
             subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
         };
@@ -190,7 +172,7 @@ mod tests {
     #[test]
     fn lookup_returns_correct_endpoint() {
         let mut router = Router { routes: Vec::new() };
-        let address = Address {
+        let address = Route {
             address: Ipv4Addr::new(192, 168, 0, 1),
             subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
         };
@@ -206,7 +188,7 @@ mod tests {
     #[test]
     fn lookup_returns_empty_vector_for_unknown_address() {
         let router = Router { routes: Vec::new() };
-        let address = Address {
+        let address = Route {
             address: Ipv4Addr::new(192, 168, 0, 1),
             subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
         };
@@ -219,7 +201,7 @@ mod tests {
     #[test]
     fn lookup_returns_multiple_endpoints_for_same_address() {
         let mut router = Router { routes: Vec::new() };
-        let address = Address {
+        let address = Route {
             address: Ipv4Addr::new(192, 168, 0, 1),
             subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
         };
@@ -237,7 +219,7 @@ mod tests {
     #[test]
     fn insert_and_route_to_subnet() {
         let mut router = Router { routes: Vec::new() };
-        let subnet_address = Address {
+        let subnet_address = Route {
             address: Ipv4Addr::new(192, 168, 0, 0),
             subnet_mask: Ipv4Addr::new(255, 255, 0, 0),
         };
@@ -245,7 +227,7 @@ mod tests {
 
         router.insert_route(subnet_address.clone(), endpoint_id);
 
-        let address_in_subnet = Address {
+        let address_in_subnet = Route {
             address: Ipv4Addr::new(192, 168, 0, 1),
             subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
         };
@@ -258,7 +240,7 @@ mod tests {
     #[test]
     fn insert_and_route_to_subnet_with_multiple_endpoints() {
         let mut router = Router { routes: Vec::new() };
-        let subnet_address = Address {
+        let subnet_address = Route {
             address: Ipv4Addr::new(192, 168, 0, 1),
             subnet_mask: Ipv4Addr::new(255, 255, 0, 0),
         };
@@ -268,7 +250,7 @@ mod tests {
         router.insert_route(subnet_address.clone(), endpoint_id1);
         router.insert_route(subnet_address.clone(), endpoint_id2);
 
-        let address_in_subnet = Address {
+        let address_in_subnet = Route {
             address: Ipv4Addr::new(192, 168, 0, 2),
             subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
         };
@@ -281,7 +263,7 @@ mod tests {
     #[test]
     fn insert_and_route_to_subnet_with_no_matching_endpoint() {
         let mut router = Router { routes: Vec::new() };
-        let subnet_address = Address {
+        let subnet_address = Route {
             address: Ipv4Addr::new(192, 168, 100, 0),
             subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
         };

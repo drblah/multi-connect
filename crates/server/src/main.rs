@@ -83,11 +83,11 @@ fn main() {
             .unwrap();
 
         let default_route = Some(vec![
-            common::router::Address {
+            common::router::Route {
             address: Ipv4Addr::new(0 ,0, 0, 0),
             subnet_mask: Ipv4Addr::new(0, 0, 0, 0), },
 
-            common::router::Address {
+            common::router::Route {
                 address: tun_address_ipv4,
                 subnet_mask: settings.tunnel_config.netmask, }
         ]);

@@ -14,6 +14,7 @@ pub enum ConnectionState {
     Disconnected,
 }
 
+/// Connection represents the current connection state between a certain network interface and an endpoint
 #[derive(Debug)]
 pub struct Connection {
     socket: UdpSocket,
@@ -59,6 +60,10 @@ impl Connection {
         Ok((buffer_lock[..message_length].to_vec(), self.peer_addr, self.get_name_address_touple()))
     }
 
+    /// write attempts to send a packet to the connected endpoint over the Connection's network interface.
+    /// Note: write is best-effort and will drop packets if the network interface is too busy. This is
+    /// necessary to ensure that write never blocks. A block here would cause the whole event loop to block
+    /// as well.
     pub async fn write(&self, packet: Vec<u8>) -> std::io::Result<usize> {
         match self.std_socket.send(&packet) {
             Ok(send_bytes) => { Ok(send_bytes)}

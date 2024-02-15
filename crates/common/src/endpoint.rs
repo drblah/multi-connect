@@ -13,8 +13,11 @@ use crate::connection::{Connection, ConnectionState};
 use crate::messages::{EndpointId, HelloAck, Messages, Packet};
 use crate::packet_sorter::PacketSorter;
 use crate::path_latency::PathLatency;
-use crate::router::Address;
+use crate::router::Route;
 
+/// Endpoint represents a remote peer instance of multi-connect. It consists mainly of a list of
+/// Connections, an EndpointId (which must be globally unique amongst all connected Endpoints), and
+/// a session ID, which is randomly generated every time an Endpoint is created.
 #[derive(Debug)]
 pub struct Endpoint {
     pub id: EndpointId,
@@ -51,7 +54,6 @@ impl Endpoint {
         local_address: SocketAddr,
     ) -> Result<(), std::io::Error> {
         // We already know the connection, so we update the last seen time
-        // TODO: Also check on interface name
         if let Some((_address, connection)) = self.connections.iter_mut().find(|((name, addr), _)| *addr == source_address && *name == interface_name) {
             info!("Reset hello timeout for {}", source_address);
             connection.reset_hello_timeout().await;
@@ -78,7 +80,7 @@ impl Endpoint {
         Ok(())
     }
 
-    pub async fn acknowledge(&mut self, own_id: EndpointId, session_id: Uuid, own_static_routes: &Option<Vec<Address>>) {
+    pub async fn acknowledge(&mut self, own_id: EndpointId, session_id: Uuid, own_static_routes: &Option<Vec<Route>>) {
         // Return ACK
         let ack = HelloAck { id: own_id, session_id, static_routes: own_static_routes.clone(), hello_ack_seq: self.hello_ack_counter };
         self.hello_ack_counter.add_assign(1);

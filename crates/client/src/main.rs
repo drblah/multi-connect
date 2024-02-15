@@ -9,7 +9,7 @@ use smol::future::{FutureExt};
 use common::messages::{EndpointId, Packet};
 use log::{debug, error, info};
 use tokio_tun::{TunBuilder};
-use common::router::Address;
+use common::router::Route;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
@@ -75,7 +75,7 @@ fn main() {
         let mut static_routes = Vec::new();
         for route in &settings.static_routes {
             static_routes.push(
-                Address {
+                Route {
                     address: route.address,
                     subnet_mask: route.subnet_mask,
                 }
@@ -83,7 +83,7 @@ fn main() {
         }
 
         static_routes.push(
-            common::router::Address {
+            common::router::Route {
                 address: client_tun_ipv4,
                 subnet_mask: settings.tunnel_config.netmask, }
         );

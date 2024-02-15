@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::router::Address;
+use crate::router::Route;
 
 pub type EndpointId = u16;
 
@@ -16,7 +16,7 @@ pub struct Packet {
 pub struct Hello {
     pub id: EndpointId,
     pub session_id: Uuid,
-    pub static_routes: Option<Vec<Address>>,
+    pub static_routes: Option<Vec<Route>>,
     pub hello_seq: u64
 }
 
@@ -24,7 +24,7 @@ pub struct Hello {
 pub struct HelloAck {
     pub id: EndpointId,
     pub session_id: Uuid,
-    pub static_routes: Option<Vec<Address>>,
+    pub static_routes: Option<Vec<Route>>,
     pub hello_ack_seq: u64
 }
 

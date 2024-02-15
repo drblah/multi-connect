@@ -11,7 +11,7 @@ use tokio_tun::Tun;
 use uuid::Uuid;
 use crate::endpoint::Endpoint;
 use crate::{ConnectionInfo, make_socket, messages};
-use crate::router::{Address, Router};
+use crate::router::{Route, Router};
 
 
 #[derive(Debug)]
@@ -22,11 +22,11 @@ pub struct ConnectionManager {
     session_history: Vec<Uuid>,
     routes: Router,
     pub tun_address: IpAddr,
-    own_static_routes: Option<Vec<Address>>
+    own_static_routes: Option<Vec<Route>>
 }
 
 impl ConnectionManager {
-    pub fn new(local_address: SocketAddr, own_id: EndpointId, tun_address: IpAddr, own_static_routes: Option<Vec<Address>>) -> ConnectionManager {
+    pub fn new(local_address: SocketAddr, own_id: EndpointId, tun_address: IpAddr, own_static_routes: Option<Vec<Route>>) -> ConnectionManager {
         ConnectionManager {
             endpoints: HashMap::new(),
             local_address,

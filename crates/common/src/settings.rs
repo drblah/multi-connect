@@ -22,7 +22,7 @@ pub struct Interface {
 }
 
 #[derive(Deserialize, Debug, Clone)]
-pub struct AddressConfig {
+pub struct RouteConfig {
     pub address: Ipv4Addr,
     pub subnet_mask: Ipv4Addr
 }
@@ -34,6 +34,6 @@ pub struct ClientSettings {
     pub server_id: u16,
     pub server_address: SocketAddr,
     pub tunnel_config: TunnelSettings,
-    pub static_routes: Vec<AddressConfig>
+    pub static_routes: Vec<RouteConfig>
 }
 
