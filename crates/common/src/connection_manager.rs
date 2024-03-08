@@ -158,9 +158,6 @@ impl ConnectionManager {
                     }
 
                 }
-                Messages::KeepAlive(_) => {
-                    todo!()
-                }
             }
         }
     }

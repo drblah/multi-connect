@@ -29,14 +29,8 @@ pub struct HelloAck {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct KeepAlive {
-    pub id: EndpointId,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub enum Messages {
     Packet(Packet),
     Hello(Hello),
     HelloAck(HelloAck),
-    KeepAlive(KeepAlive),
 }
