@@ -32,7 +32,7 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
-    pub fn new(id: EndpointId, session_id: Uuid) -> Self {
+    pub fn new(id: EndpointId, session_id: Uuid, packet_sorter_deadline: u64) -> Self {
         Endpoint {
             id,
             connections: Vec::new(),
@@ -40,8 +40,7 @@ impl Endpoint {
             tx_counter: 0,
             hello_counter: 0,
             hello_ack_counter: 0,
-            // TODO: Expose packet_sorter timeout in settings
-            packet_sorter: PacketSorter::new(Duration::from_millis(100)),
+            packet_sorter: PacketSorter::new(Duration::from_millis(packet_sorter_deadline)),
             hello_path_latency: PathLatency::new(),
             hello_ack_path_latency: PathLatency::new()
         }

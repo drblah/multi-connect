@@ -14,6 +14,7 @@ pub struct ServerSettings {
     pub server_bind_address: SocketAddr,
     pub tunnel_config: TunnelSettings,
     pub connection_timeout: u64,
+    pub packet_sorter_deadline: u64
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -37,5 +38,6 @@ pub struct ClientSettings {
     pub tunnel_config: TunnelSettings,
     pub static_routes: Vec<RouteConfig>,
     pub connection_timeout: u64,
+    pub packet_sorter_deadline: u64
 }
 

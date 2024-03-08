@@ -92,7 +92,7 @@ fn main() {
                 subnet_mask: settings.tunnel_config.netmask, }
         ]);
 
-        let mut conman = ConnectionManager::new(socketaddr, settings.peer_id, tun_address, default_route, settings.connection_timeout);
+        let mut conman = ConnectionManager::new(socketaddr, settings.peer_id, tun_address, default_route, settings.connection_timeout, settings.packet_sorter_deadline);
 
         loop {
             if conman.has_endpoints() {

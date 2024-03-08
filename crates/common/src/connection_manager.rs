@@ -23,11 +23,12 @@ pub struct ConnectionManager {
     routes: Router,
     pub tun_address: IpAddr,
     own_static_routes: Option<Vec<Route>>,
-    connection_timeout: u64
+    connection_timeout: u64,
+    packet_sorter_deadline: u64
 }
 
 impl ConnectionManager {
-    pub fn new(local_address: SocketAddr, own_id: EndpointId, tun_address: IpAddr, own_static_routes: Option<Vec<Route>>, connection_timeout: u64) -> ConnectionManager {
+    pub fn new(local_address: SocketAddr, own_id: EndpointId, tun_address: IpAddr, own_static_routes: Option<Vec<Route>>, connection_timeout: u64, packet_sorter_deadline: u64) -> ConnectionManager {
         ConnectionManager {
             endpoints: HashMap::new(),
             local_address,
@@ -36,7 +37,8 @@ impl ConnectionManager {
             routes: Router::new(),
             tun_address,
             own_static_routes,
-            connection_timeout
+            connection_timeout,
+            packet_sorter_deadline
         }
     }
 
@@ -50,7 +52,7 @@ impl ConnectionManager {
 
                 // Ensure endpoint exists
                 if !self.endpoints.contains_key(&decoded.id) {
-                    let new_endpoint = Endpoint::new(decoded.id.clone(), decoded.session_id.clone());
+                    let new_endpoint = Endpoint::new(decoded.id.clone(), decoded.session_id.clone(), self.packet_sorter_deadline);
                     self.endpoints.insert(decoded.id.clone(), new_endpoint);
                     self.session_history.push(decoded.session_id.clone());
                 }
@@ -64,7 +66,7 @@ impl ConnectionManager {
                             return;
                         } else {
                             info!("Session ID has changed. Overwriting endpoint");
-                            *endpoint = Endpoint::new(decoded.id.clone(), decoded.session_id.clone());
+                            *endpoint = Endpoint::new(decoded.id.clone(), decoded.session_id.clone(), self.packet_sorter_deadline);
                             self.session_history.push(decoded.session_id.clone());
                         }
                     }
@@ -182,7 +184,7 @@ impl ConnectionManager {
         let new_endpoint = match self.endpoints.get_mut(&destination_endpoint_id) {
             Some(endpoint) => endpoint,
             None => {
-                let new_endpoint = Endpoint::new(destination_endpoint_id, Uuid::new_v4());
+                let new_endpoint = Endpoint::new(destination_endpoint_id, Uuid::new_v4(), self.packet_sorter_deadline);
                 self.endpoints.insert(destination_endpoint_id, new_endpoint);
                 self.endpoints.get_mut(&destination_endpoint_id).unwrap()
             }
@@ -455,7 +457,7 @@ mod tests {
     fn handle_hello_from_empty() {
         smol::block_on(async {
             let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None);
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
 
 
             //let hello_tun_address = "127.0.0.2".parse().unwrap();
@@ -483,7 +485,7 @@ mod tests {
                 Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap()
             ];
             let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None);
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
 
             let server_interface_name = "DYN-interface".to_string();
 
@@ -515,7 +517,7 @@ mod tests {
                 Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
             ];
             let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None);
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
             let server_interface_name = "DYN-interface".to_string();
 
             for uuid in uuids {
@@ -541,7 +543,7 @@ mod tests {
     fn connection_manager_client_single_connection() {
         smol::block_on(async {
             let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None);
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
 
             let own_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
             let server_id = 1337;
@@ -582,7 +584,7 @@ mod tests {
     fn connection_manager_client_multiple_connections() {
         smol::block_on(async {
             let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None);
+            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
 
             let own_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
             let server_id = 1337;

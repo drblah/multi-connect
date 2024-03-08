@@ -11,7 +11,6 @@ pub struct PacketSorter {
     packet_queue: BTreeMap<u64, Packet>,
     pub next_seq: u64,
 
-    // TODO: Expose this deadline as a user configuration
     deadline: Duration,
     deadline_timer: Mutex<smol::Timer>,
     sorted_packet_queue_tx: smol::channel::Sender<Packet>,
