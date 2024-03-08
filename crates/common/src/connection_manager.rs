@@ -22,11 +22,12 @@ pub struct ConnectionManager {
     session_history: Vec<Uuid>,
     routes: Router,
     pub tun_address: IpAddr,
-    own_static_routes: Option<Vec<Route>>
+    own_static_routes: Option<Vec<Route>>,
+    connection_timeout: u64
 }
 
 impl ConnectionManager {
-    pub fn new(local_address: SocketAddr, own_id: EndpointId, tun_address: IpAddr, own_static_routes: Option<Vec<Route>>) -> ConnectionManager {
+    pub fn new(local_address: SocketAddr, own_id: EndpointId, tun_address: IpAddr, own_static_routes: Option<Vec<Route>>, connection_timeout: u64) -> ConnectionManager {
         ConnectionManager {
             endpoints: HashMap::new(),
             local_address,
@@ -34,7 +35,8 @@ impl ConnectionManager {
             session_history: Vec::new(),
             routes: Router::new(),
             tun_address,
-            own_static_routes
+            own_static_routes,
+            connection_timeout
         }
     }
 
@@ -69,7 +71,7 @@ impl ConnectionManager {
 
                     // Add connections
                     match endpoint
-                        .add_connection(source_address, interface_name, self.local_address)
+                        .add_connection(source_address, interface_name, self.local_address, self.connection_timeout)
                         .await
                     {
                         Ok(()) => {
@@ -116,7 +118,7 @@ impl ConnectionManager {
                 Messages::Hello(hello) => {
                     if let Some(endpoint) = self.endpoints.get_mut(&hello.id) {
                         endpoint.hello_path_latency.insert_new_timestamp(hello.hello_seq);
-                        endpoint.add_connection(source_address, receiver_interface.0, self.local_address).await.unwrap();
+                        endpoint.add_connection(source_address, receiver_interface.0, self.local_address, self.connection_timeout).await.unwrap();
                         endpoint.acknowledge( self.own_id, endpoint.session_id, &self.own_static_routes).await;
                         debug!("Hello latency-diff: {:.2} - Hello-ack latency-diff: {:.2}", endpoint.hello_path_latency.estimate_path_delay_difference().as_millis(), endpoint.hello_ack_path_latency.estimate_path_delay_difference().as_millis())
                     } else {
@@ -194,7 +196,7 @@ impl ConnectionManager {
         let encoded = bincode::serialize(&hello).unwrap();
 
         new_socket.send(&encoded).await?;
-        let mut new_connection = crate::connection::Connection::new(new_socket, Some(interface_name.clone()));
+        let mut new_connection = crate::connection::Connection::new(new_socket, Some(interface_name.clone()), self.connection_timeout);
         new_connection.state = crate::connection::ConnectionState::Startup;
         new_endpoint.connections.push(((interface_name, destination_address), new_connection));
 

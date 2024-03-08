@@ -5,5 +5,6 @@
     "tunnel_device_address": "10.12.0.1",
     "netmask": "255.255.255.0",
     "mtu": 1400
-  }
+  },
+  "connection_timeout": 10000
 }

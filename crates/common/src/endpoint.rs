@@ -52,6 +52,7 @@ impl Endpoint {
         source_address: SocketAddr,
         interface_name: String,
         local_address: SocketAddr,
+        connection_timeout: u64
     ) -> Result<(), std::io::Error> {
         // We already know the connection, so we update the last seen time
         if let Some((_address, connection)) = self.connections.iter_mut().find(|((name, addr), _)| *addr == source_address && *name == interface_name) {
@@ -72,7 +73,7 @@ impl Endpoint {
 
             // We don't know the interface_name when we handle dynamically incoming connection
             // TODO: Figure out if we need to handle this case
-            let new_connection = Connection::new(socket, None);
+            let new_connection = Connection::new(socket, None, connection_timeout);
 
             self.connections.push(((interface_name, source_address), new_connection));
         }

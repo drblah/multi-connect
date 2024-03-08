@@ -23,7 +23,6 @@ pub struct Connection {
     #[allow(dead_code)]
     local_address: SocketAddr,
 
-    // TODO: Expose this connection timeout as a user configuration
     connection_timeout: Mutex<smol::Timer>,
     pub state: ConnectionState,
     buffer: Mutex<[u8; 65535]>,
@@ -31,7 +30,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(socket: UdpSocket, interface_name: Option<String>) -> Connection {
+    pub fn new(socket: UdpSocket, interface_name: Option<String>, connection_timeout: u64) -> Connection {
         let destination_socket_addr = socket.peer_addr().unwrap();
         let std_socket = unsafe { std::net::UdpSocket::from_raw_fd(socket.clone().as_raw_fd()) };
         let local_address = std_socket.local_addr().unwrap();
@@ -41,7 +40,7 @@ impl Connection {
             std_socket,
             interface_name,
             local_address,
-            connection_timeout: Mutex::new(smol::Timer::after(Duration::from_secs(10))),
+            connection_timeout: Mutex::new(smol::Timer::after(Duration::from_millis(connection_timeout))),
             state: ConnectionState::Startup,
             buffer: Mutex::new([0; 65535]),
             peer_addr: destination_socket_addr

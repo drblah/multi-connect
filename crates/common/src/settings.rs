@@ -12,7 +12,8 @@ pub struct TunnelSettings {
 pub struct ServerSettings {
     pub peer_id: u16,
     pub server_bind_address: SocketAddr,
-    pub tunnel_config: TunnelSettings
+    pub tunnel_config: TunnelSettings,
+    pub connection_timeout: u64,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -34,6 +35,7 @@ pub struct ClientSettings {
     pub server_id: u16,
     pub server_address: SocketAddr,
     pub tunnel_config: TunnelSettings,
-    pub static_routes: Vec<RouteConfig>
+    pub static_routes: Vec<RouteConfig>,
+    pub connection_timeout: u64,
 }
 
