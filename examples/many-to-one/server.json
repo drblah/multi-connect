@@ -10,5 +10,8 @@
   "packet_sorter_deadline": 100,
   "interface_logger": {
     "log_path": "server-interface.log"
+  },
+  "packet_sorter_logger": {
+    "log_path": "server-packet-sorter.log"
   }
 }

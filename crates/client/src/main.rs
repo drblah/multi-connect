@@ -10,6 +10,7 @@ use common::messages::{EndpointId, Packet};
 use log::{debug, error, info};
 use tokio_tun::{TunBuilder};
 use common::interface_logger::InterfaceLogger;
+use common::packet_sorter_log::PacketSorterLogger;
 use common::router::Route;
 
 #[derive(Parser, Debug)]
@@ -43,9 +44,14 @@ fn main() {
     smol::block_on(Compat::new(async {
 
         let mut interface_logger = None;
+        let mut packet_sorter_logger = None;
 
         if let Some(interface_logger_settings) = settings.interface_logger {
             interface_logger = Some(InterfaceLogger::new(interface_logger_settings.log_path.clone()).await)
+        }
+
+        if let Some(packet_sorter_logger_settings) = settings.packet_sorter_logger {
+            packet_sorter_logger = Some(PacketSorterLogger::new(packet_sorter_logger_settings.log_path.clone()).await)
         }
 
         let client_tun_ip = settings.tunnel_config.tunnel_device_address; //"10.12.0.5".parse().unwrap();
@@ -182,9 +188,19 @@ fn main() {
                             interface_logger.flush().await;
                         }
 
+                        if let Some(packet_sorter_logger) = &mut packet_sorter_logger {
+                            packet_sorter_logger.flush().await;
+                        }
+
                     }
                     Events::NewSortedPacket((_endpoint_id, maybe_packet)) => {
                         if let Some(packet) = maybe_packet {
+                            if let Some(packet_sorter_logger) = &mut packet_sorter_logger {
+                                packet_sorter_logger.add_log_line(
+                                    packet.seq
+                                ).await
+                            }
+
                             tun.send(packet.bytes.as_slice()).await.unwrap();
                         }
                     }

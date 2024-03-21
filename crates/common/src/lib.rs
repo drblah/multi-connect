@@ -22,6 +22,7 @@ pub mod settings;
 mod path_latency;
 pub mod router;
 pub mod interface_logger;
+pub mod packet_sorter_log;
 
 
 pub fn interface_to_ipaddr(interface: &str) -> Result<Ipv4Addr, Error> {

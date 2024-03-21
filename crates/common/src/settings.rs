@@ -15,7 +15,8 @@ pub struct ServerSettings {
     pub tunnel_config: TunnelSettings,
     pub connection_timeout: u64,
     pub packet_sorter_deadline: u64,
-    pub interface_logger: Option<InterfaceLoggerSettings>
+    pub interface_logger: Option<InterfaceLoggerSettings>,
+    pub packet_sorter_logger: Option<PacketSorterLoggerSettings>
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -36,6 +37,11 @@ pub struct InterfaceLoggerSettings {
 }
 
 #[derive(Deserialize, Debug, Clone)]
+pub struct PacketSorterLoggerSettings {
+    pub log_path: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
 pub struct ClientSettings {
     pub peer_id: u16,
     pub interfaces: Vec<Interface>,
@@ -45,6 +51,7 @@ pub struct ClientSettings {
     pub static_routes: Vec<RouteConfig>,
     pub connection_timeout: u64,
     pub packet_sorter_deadline: u64,
-    pub interface_logger: Option<InterfaceLoggerSettings>
+    pub interface_logger: Option<InterfaceLoggerSettings>,
+    pub packet_sorter_logger: Option<PacketSorterLoggerSettings>
 }
 
