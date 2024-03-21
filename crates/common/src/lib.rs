@@ -21,6 +21,7 @@ pub mod connection_manager;
 pub mod settings;
 mod path_latency;
 pub mod router;
+pub mod interface_logger;
 
 
 pub fn interface_to_ipaddr(interface: &str) -> Result<Ipv4Addr, Error> {

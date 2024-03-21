@@ -8,6 +8,7 @@ use async_compat::Compat;
 use clap::Parser;
 use log::{error, info};
 use tokio_tun::{TunBuilder};
+use common::interface_logger::InterfaceLogger;
 use common::settings;
 
 #[derive(Parser, Debug)]
@@ -44,6 +45,13 @@ fn main() {
 
 
     smol::block_on(Compat::new (async {
+
+        let mut interface_logger = None;
+
+        if let Some(interface_logger_settings) = settings.interface_logger {
+            interface_logger = Some(InterfaceLogger::new(interface_logger_settings.log_path.clone()).await)
+        }
+
         let server_socket =
             socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None).unwrap();
         server_socket.set_reuse_address(true).unwrap();
@@ -130,7 +138,7 @@ fn main() {
                     Events::NewEstablishedMessage(result) => match result {
                         Ok((endpointid, message, source_address, receiver_interface)) => {
                             //info!("Endpoint: {}, produced message: {:?}", endpointid, message);
-                            conman.handle_established_message(message, endpointid, source_address, receiver_interface).await;
+                            conman.handle_established_message(message, endpointid, source_address, receiver_interface, &mut interface_logger).await;
 
                         }
                         Err(e) => {

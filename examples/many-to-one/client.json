@@ -24,5 +24,8 @@
     }
   ],
   "connection_timeout": 10000,
-  "packet_sorter_deadline": 100
+  "packet_sorter_deadline": 100,
+  "interface_logger": {
+    "log_path": "client-interface.log"
+  }
 }

@@ -9,6 +9,7 @@ use smol::future::{FutureExt};
 use common::messages::{EndpointId, Packet};
 use log::{debug, error, info};
 use tokio_tun::{TunBuilder};
+use common::interface_logger::InterfaceLogger;
 use common::router::Route;
 
 #[derive(Parser, Debug)]
@@ -40,6 +41,12 @@ fn main() {
     info!("Using config: {:?}", settings);
 
     smol::block_on(Compat::new(async {
+
+        let mut interface_logger = None;
+
+        if let Some(interface_logger_settings) = settings.interface_logger {
+            interface_logger = Some(InterfaceLogger::new(interface_logger_settings.log_path.clone()).await)
+        }
 
         let client_tun_ip = settings.tunnel_config.tunnel_device_address; //"10.12.0.5".parse().unwrap();
 
@@ -144,7 +151,7 @@ fn main() {
                     Events::NewEstablishedMessage(result) => match result {
                         Ok((endpointid, message, source_address, receiver_interface)) => {
                             //info!("Endpoint: {}, produced message: {:?}", endpointid, message);
-                            connection_manager.handle_established_message(message, endpointid, source_address, receiver_interface).await;
+                            connection_manager.handle_established_message(message, endpointid, source_address, receiver_interface, &mut interface_logger).await;
 
                         }
                         Err(e) => {
@@ -171,6 +178,9 @@ fn main() {
 
                         // Reopen dead connections
                         connection_manager.ensure_endpoint_connections(server_endpoint_id, &connection_info).await;
+                        if let Some(interface_logger) = &mut interface_logger {
+                            interface_logger.flush().await;
+                        }
 
                     }
                     Events::NewSortedPacket((_endpoint_id, maybe_packet)) => {

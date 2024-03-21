@@ -11,6 +11,7 @@ use tokio_tun::Tun;
 use uuid::Uuid;
 use crate::endpoint::Endpoint;
 use crate::{ConnectionInfo, make_socket, messages};
+use crate::interface_logger::InterfaceLogger;
 use crate::router::{Route, Router};
 
 
@@ -109,11 +110,15 @@ impl ConnectionManager {
         }
     }
 
-    pub async fn handle_established_message(&mut self, message: Vec<u8>, endpoint_id: EndpointId, source_address: SocketAddr, receiver_interface: (String, SocketAddr)) {
+    pub async fn handle_established_message(&mut self, message: Vec<u8>, endpoint_id: EndpointId, source_address: SocketAddr, receiver_interface: (String, SocketAddr), interface_logger: &mut Option<InterfaceLogger>) {
         if let Ok(decoded) = bincode::deserialize::<Messages>(&message) {
             match decoded {
                 Messages::Packet(packet) => {
                     if let Some(endpoint) = self.endpoints.get_mut(&endpoint_id) {
+                        if let Some(interface_logger) = interface_logger {
+                            interface_logger.add_log_line(endpoint_id, packet.seq, receiver_interface.0.clone()).await;
+                        }
+
                         endpoint.packet_sorter.insert_packet(packet).await;
                     }
                 }
