@@ -4,9 +4,11 @@ use common::messages::{EndpointId, Packet};
 use smol::{future::FutureExt, net, Async};
 use socket2::SockAddr;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::time::{Duration, Instant};
 use async_compat::Compat;
 use clap::Parser;
 use log::{error, info};
+use smol::stream::StreamExt;
 use tokio_tun::{TunBuilder};
 use common::interface_logger::InterfaceLogger;
 use common::settings;
@@ -27,7 +29,9 @@ enum Events {
     ConnectionTimeout((EndpointId, String, SocketAddr)),
     PacketSorter(EndpointId),
     TunnelPacket(std::io::Result<usize>),
-    NewSortedPacket((EndpointId, Option<Packet>))
+    NewSortedPacket((EndpointId, Option<Packet>)),
+    #[allow(dead_code)]
+    FlushInterfaceLog(Option<Instant>)
 }
 
 
@@ -100,6 +104,8 @@ fn main() {
                 subnet_mask: settings.tunnel_config.netmask, }
         ]);
 
+        let mut flush_interface_log_timer = smol::Timer::interval(Duration::from_secs(1));
+
         let mut conman = ConnectionManager::new(socketaddr, settings.peer_id, tun_address, default_route, settings.connection_timeout, settings.packet_sorter_deadline);
 
         loop {
@@ -123,6 +129,9 @@ fn main() {
                 let wrapped_new_sorted_packet = async {
                     Events::NewSortedPacket(conman.await_endpoint_sorted_packets().await)
                 };
+                let wrapped_flush_interface_log = async {
+                    Events::FlushInterfaceLog(flush_interface_log_timer.next().await)
+                };
 
                 match wrapped_server
                     .race(wrapped_endpoints)
@@ -130,6 +139,7 @@ fn main() {
                     .race(wrapped_packet_sorter)
                     .race(wrapped_tunnel_device)
                     .race(wrapped_new_sorted_packet)
+                    .race(wrapped_flush_interface_log)
                     .await
                 {
                     Events::NewConnection((len, addr)) => {
@@ -162,6 +172,11 @@ fn main() {
                     Events::NewSortedPacket((_endpoint_id, maybe_packet)) => {
                         if let Some(packet) = maybe_packet {
                             tun_device.send(packet.bytes.as_slice()).await.unwrap();
+                        }
+                    }
+                    Events::FlushInterfaceLog(_) => {
+                        if let Some(interface_logger) = &mut interface_logger {
+                            interface_logger.flush().await;
                         }
                     }
                 }
