@@ -3,8 +3,11 @@ use crate::messages::{EndpointId, Messages, Packet};
 use futures::future::select_all;
 use smol::future::FutureExt;
 use std::collections::{HashMap};
+use std::io::Error;
 use std::net::{IpAddr, SocketAddr};
 use std::ops::AddAssign;
+use aes_gcm_siv::{Aes256GcmSiv, KeyInit};
+use aes_gcm_siv::aead::Aead;
 use etherparse::{InternetSlice, SlicedPacket};
 use log::{debug, error, info, warn};
 use tokio_tun::Tun;
@@ -47,68 +50,89 @@ impl ConnectionManager {
 
     /// Handles new incomming connections and keeps existing connections alive
     pub async fn handle_hello(&mut self, message: Vec<u8>, source_address: SocketAddr, interface_name: String) {
-        if let Ok(decoded) = bincode::deserialize::<Messages>(&message) {
-            info!("Hello decoded!");
-            info!("{:?}", decoded);
-
-            if let Messages::Hello(decoded) = decoded {
-
-                // Ensure endpoint exists
-                if !self.endpoints.contains_key(&decoded.id) {
-                    let new_endpoint = Endpoint::new(decoded.id.clone(), decoded.session_id.clone(), self.packet_sorter_deadline);
-                    self.endpoints.insert(decoded.id.clone(), new_endpoint);
-                    self.session_history.push(decoded.session_id.clone());
-                }
-
-
-                if let Some(endpoint) = self.endpoints.get_mut(&decoded.id) {
-                    // If the session id has changed. Overwrite the endpoint
-                    if endpoint.session_id != decoded.session_id {
-                        if self.session_history.contains(&decoded.session_id) {
-                            error!("Session ID {} for endpoint {} has already been used. Refusing to accept new connection.", decoded.session_id, decoded.id);
-                            return;
-                        } else {
-                            info!("Session ID has changed. Overwriting endpoint");
-                            *endpoint = Endpoint::new(decoded.id.clone(), decoded.session_id.clone(), self.packet_sorter_deadline);
-                            self.session_history.push(decoded.session_id.clone());
-                        }
+        let cipher = Aes256GcmSiv::new_from_slice(&self.encrpytion_key).unwrap();
+        let maybe_decrypted_message = match bincode::deserialize::<messages::EncryptedMessage>(&message) {
+            Ok(encrypted_msg) => {
+                match cipher.decrypt((&encrypted_msg.nonce).into(), encrypted_msg.message.as_ref()) {
+                    Ok(decrypted) => {
+                        Some(decrypted)
                     }
-
-                    // Add connections
-                    match endpoint
-                        .add_connection(source_address, interface_name, self.local_address, self.connection_timeout, &self.encrpytion_key)
-                        .await
-                    {
-                        Ok(()) => {
-                            info!(
-                                "Added {} as a new connection to EP: {}",
-                                source_address, decoded.id
-                            );
-
-                            endpoint.acknowledge(self.own_id, endpoint.session_id, &self.own_static_routes).await
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to add {} as new connection to EP: {} due to error: {}",
-                                source_address,
-                                decoded.id,
-                                e.to_string()
-                            )
-                        }
-                    }
-
-                    endpoint.acknowledge(self.own_id, endpoint.session_id, &self.own_static_routes).await;
-
-                    // Add route
-                    if let Some(new_static_routes) = decoded.static_routes {
-                        for route in new_static_routes {
-                            self.routes.insert_route(route, decoded.id)
-                        }
+                    Err(e) => {
+                        error!("Failed to decrypt EncryptedMessage from: {}: {}", source_address, e);
+                        None
                     }
                 }
             }
-        } else {
-            error!("Failed to decode. But lets say hi anyways :^)");
+            Err(e) => {
+                error!("Failed to decode EncryptedMessage from: {}: {}", source_address, e);
+                None
+            }
+        };
+
+        if let Some(decrypted_message) = maybe_decrypted_message {
+            if let Ok(decoded) = bincode::deserialize::<Messages>(&decrypted_message) {
+                info!("Hello decoded!");
+                info!("{:?}", decoded);
+
+                if let Messages::Hello(decoded) = decoded {
+
+                    // Ensure endpoint exists
+                    if !self.endpoints.contains_key(&decoded.id) {
+                        let new_endpoint = Endpoint::new(decoded.id.clone(), decoded.session_id.clone(), self.packet_sorter_deadline);
+                        self.endpoints.insert(decoded.id.clone(), new_endpoint);
+                        self.session_history.push(decoded.session_id.clone());
+                    }
+
+
+                    if let Some(endpoint) = self.endpoints.get_mut(&decoded.id) {
+                        // If the session id has changed. Overwrite the endpoint
+                        if endpoint.session_id != decoded.session_id {
+                            if self.session_history.contains(&decoded.session_id) {
+                                error!("Session ID {} for endpoint {} has already been used. Refusing to accept new connection.", decoded.session_id, decoded.id);
+                                return;
+                            } else {
+                                info!("Session ID has changed. Overwriting endpoint");
+                                *endpoint = Endpoint::new(decoded.id.clone(), decoded.session_id.clone(), self.packet_sorter_deadline);
+                                self.session_history.push(decoded.session_id.clone());
+                            }
+                        }
+
+                        // Add connections
+                        match endpoint
+                            .add_connection(source_address, interface_name, self.local_address, self.connection_timeout, &self.encrpytion_key)
+                            .await
+                        {
+                            Ok(()) => {
+                                info!(
+                                    "Added {} as a new connection to EP: {}",
+                                    source_address, decoded.id
+                                );
+
+                                endpoint.acknowledge(self.own_id, endpoint.session_id, &self.own_static_routes).await
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Failed to add {} as new connection to EP: {} due to error: {}",
+                                    source_address,
+                                    decoded.id,
+                                    e.to_string()
+                                )
+                            }
+                        }
+
+                        endpoint.acknowledge(self.own_id, endpoint.session_id, &self.own_static_routes).await;
+
+                        // Add route
+                        if let Some(new_static_routes) = decoded.static_routes {
+                            for route in new_static_routes {
+                                self.routes.insert_route(route, decoded.id)
+                            }
+                        }
+                    }
+                }
+            } else {
+                error!("Failed to decode. But lets say hi anyways :^)");
+            }
         }
     }
 
@@ -201,8 +225,9 @@ impl ConnectionManager {
         new_endpoint.hello_counter.add_assign(1);
         let encoded = bincode::serialize(&hello).unwrap();
 
-        new_socket.send(&encoded).await?;
+        //new_socket.send(&encoded).await?;
         let mut new_connection = crate::connection::Connection::new(new_socket, Some(interface_name.clone()), self.connection_timeout, &self.encrpytion_key);
+        new_connection.write(encoded).await?;
         new_connection.state = crate::connection::ConnectionState::Startup;
         new_endpoint.connections.push(((interface_name, destination_address), new_connection));
 
