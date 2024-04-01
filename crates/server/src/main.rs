@@ -112,7 +112,7 @@ fn main() {
 
         let mut flush_interface_log_timer = smol::Timer::interval(Duration::from_secs(1));
 
-        let mut conman = ConnectionManager::new(socketaddr, settings.peer_id, tun_address, default_route, settings.connection_timeout, settings.packet_sorter_deadline);
+        let mut conman = ConnectionManager::new(socketaddr, settings.peer_id, tun_address, default_route, settings.connection_timeout, settings.packet_sorter_deadline, settings.encryption_key);
 
         loop {
             if conman.has_endpoints() {

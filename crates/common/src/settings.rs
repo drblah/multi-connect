@@ -16,7 +16,8 @@ pub struct ServerSettings {
     pub connection_timeout: u64,
     pub packet_sorter_deadline: u64,
     pub interface_logger: Option<InterfaceLoggerSettings>,
-    pub packet_sorter_logger: Option<PacketSorterLoggerSettings>
+    pub packet_sorter_logger: Option<PacketSorterLoggerSettings>,
+    pub encryption_key: [u8; 32]
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -52,6 +53,7 @@ pub struct ClientSettings {
     pub connection_timeout: u64,
     pub packet_sorter_deadline: u64,
     pub interface_logger: Option<InterfaceLoggerSettings>,
-    pub packet_sorter_logger: Option<PacketSorterLoggerSettings>
+    pub packet_sorter_logger: Option<PacketSorterLoggerSettings>,
+    pub encryption_key: [u8; 32]
 }
 

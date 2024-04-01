@@ -103,7 +103,7 @@ fn main() {
 
         let static_routes = Some(static_routes);
 
-        let mut connection_manager = connection_manager::ConnectionManager::new(client_socket_address, client_id, client_tun_ip, static_routes, settings.connection_timeout, settings.packet_sorter_deadline);
+        let mut connection_manager = connection_manager::ConnectionManager::new(client_socket_address, client_id, client_tun_ip, static_routes, settings.connection_timeout, settings.packet_sorter_deadline, settings.encryption_key);
 
         let mut keepalive_timer = smol::Timer::interval(Duration::from_secs(1));
 
