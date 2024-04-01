@@ -29,6 +29,13 @@ pub struct HelloAck {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct EncryptedMessage {
+    pub nonce: [u8; 12],
+    pub message: Vec<u8>
+}
+
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub enum Messages {
     Packet(Packet),
     Hello(Hello),

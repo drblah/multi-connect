@@ -5,8 +5,11 @@ use std::time::Duration;
 use smol::lock::Mutex;
 use smol::net::UdpSocket;
 use smol::stream::StreamExt;
-use anyhow::Result;
-use log::{debug};
+use log::{debug, error};
+use crate::messages;
+
+use aes_gcm_siv::{aead::{Aead, KeyInit, OsRng}, Aes256GcmSiv};
+use aes_gcm_siv::aead::rand_core::RngCore;
 
 #[derive(Debug, PartialEq)]
 pub enum ConnectionState {
@@ -29,6 +32,8 @@ pub struct Connection {
     pub state: ConnectionState,
     buffer: Mutex<[u8; 65535]>,
     peer_addr: SocketAddr,
+    cipher: Aes256GcmSiv,
+    peer_addr: SocketAddr,
     enabled: bool
 }
 
@@ -40,7 +45,7 @@ pub struct ReadInfo {
 
 
 impl Connection {
-    pub fn new(socket: UdpSocket, interface_name: Option<String>, connection_timeout: u64) -> Connection {
+    pub fn new(socket: UdpSocket, interface_name: Option<String>, connection_timeout: u64, encryption_key: &[u8; 32]) -> Connection {
         let destination_socket_addr = socket.peer_addr().unwrap();
         let local_address = socket.local_addr().unwrap();
 
@@ -48,7 +53,7 @@ impl Connection {
         // if the underlying driver is actually ready to receive or not. **NOTE** we do some weird trickery
         // with manually implementing Drop to prevent from being closed twice when the smol socket is closed.
         let std_socket = unsafe { Some(std::net::UdpSocket::from_raw_fd(socket.clone().as_raw_fd()))};
-        
+
         Connection {
             socket,
             std_socket,
@@ -59,9 +64,10 @@ impl Connection {
             state: ConnectionState::Startup,
             buffer: Mutex::new([0; 65535]),
             peer_addr: destination_socket_addr,
+            cipher: Aes256GcmSiv::new_from_slice(encryption_key).unwrap(),
+            peer_addr: destination_socket_addr,
             enabled: true
         }
-        
     }
 
     pub async fn reset_hello_timeout(&mut self) {
@@ -69,17 +75,36 @@ impl Connection {
         deadline_lock.set_after(self.connection_timeout_duration);
     }
 
-    pub async fn read(&self) -> Result<ReadInfo> {
+    pub async fn read(&self) -> std::io::Result<ReadInfo> {
         let mut buffer_lock = self.buffer.lock().await;
         let message_length = self.socket.recv(buffer_lock.as_mut_slice()).await?;
 
-        let read_info = ReadInfo {
-            packet_bytes: buffer_lock[..message_length].to_vec(),
-            source_address: self.peer_addr,
-            interface_name: self.get_interface_name().to_string()
-        };
+        let new_message = &buffer_lock[..message_length];
 
-        Ok(read_info)
+        match bincode::deserialize::<messages::EncryptedMessage>(new_message) {
+            Ok(encrypted_msg) => {
+                match self.cipher.decrypt((&encrypted_msg.nonce).into(), encrypted_msg.message.as_ref()) {
+                    Ok(decrypted) => {
+                        let read_info = ReadInfo {
+                            packet_bytes: decrypted,
+                            source_address: self.peer_addr,
+                            interface_name: self.get_interface_name().to_string()
+                        };
+
+                        Ok(read_info)
+                    }
+                    Err(e) => {
+                        error!("Failed to decrypt EncryptedMessage from: {}: {}", self.peer_addr, e);
+                        return Err(Error::from(std::io::ErrorKind::Unsupported))
+                    }
+                }
+
+            }
+            Err(e) => {
+                error!("Failed to decode EncryptedMessage from: {}: {}", self.peer_addr, e);
+                return Err(Error::from(std::io::ErrorKind::Unsupported))
+            }
+        }
     }
 
     /// write attempts to send a packet to the connected endpoint over the Connection's network interface.
@@ -87,8 +112,19 @@ impl Connection {
     /// necessary to ensure that write never blocks. A block here would cause the whole event loop to block
     /// as well.
     pub async fn write(&self, packet: Vec<u8>) -> std::io::Result<usize> {
+        let mut nonce_bytes = [0u8; 12];
+        OsRng.fill_bytes(&mut nonce_bytes);
+        // TODO: Figure out if and how this can fail?
+        let encrypted = self.cipher.encrypt(&nonce_bytes.into(), packet.as_ref()).unwrap();
+        let encrypted_message = messages::EncryptedMessage {
+            nonce: nonce_bytes,
+            message: encrypted,
+        };
+
+        let encoded = bincode::serialize(&encrypted_message).unwrap();
+
         if let Some(std_socket) = &self.std_socket {
-            match std_socket.send(&packet) {
+            match std_socket.send(&encoded) {
                 Ok(send_bytes) => {
                     Ok(send_bytes)
                 }

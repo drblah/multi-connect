@@ -25,7 +25,7 @@ pub struct ConnectionEntry {
 /// Endpoint represents a remote peer instance of multi-connect. It consists mainly of a list of
 /// Connections, an EndpointId (which must be globally unique amongst all connected Endpoints), and
 /// a session ID, which is randomly generated every time an Endpoint is created.
-#[derive(Debug)]
+
 pub struct Endpoint {
     pub id: EndpointId,
     pub session_id: Uuid,
@@ -63,7 +63,8 @@ impl Endpoint {
         source_address: SocketAddr,
         interface_name: String,
         local_address: SocketAddr,
-        connection_timeout: u64
+        connection_timeout: u64,
+        encrpytion_key: &[u8; 32]
     ) -> Result<(), std::io::Error> {
         // We already know the connection, so we update the last seen time
         if let Some(connection_entry) = self.connections.iter_mut().find(|connection_entry| connection_entry.interface_address == source_address && *connection_entry.interface_name == interface_name) {
@@ -84,7 +85,7 @@ impl Endpoint {
 
             // We don't know the interface_name when we handle dynamically incoming connection
             // TODO: Figure out if we need to handle this case
-            let new_connection = Connection::new(socket, None, connection_timeout);
+            let new_connection = Connection::new(socket, None, connection_timeout, encrpytion_key);
 
             let connection_entry = ConnectionEntry {
                 interface_name,
