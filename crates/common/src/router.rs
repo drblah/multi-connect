@@ -88,9 +88,7 @@ impl Router {
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv4Addr;
     use super::*;
-    use crate::messages::EndpointId;
 
     #[test]
     fn address_is_in_subnet() {
@@ -188,10 +186,6 @@ mod tests {
     #[test]
     fn lookup_returns_empty_vector_for_unknown_address() {
         let router = Router { routes: Vec::new() };
-        let address = Route {
-            address: Ipv4Addr::new(192, 168, 0, 1),
-            subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
-        };
 
         let result = router.lookup(&Ipv4Addr::new(192, 168, 0, 5));
 
@@ -227,11 +221,6 @@ mod tests {
 
         router.insert_route(subnet_address.clone(), endpoint_id);
 
-        let address_in_subnet = Route {
-            address: Ipv4Addr::new(192, 168, 0, 1),
-            subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
-        };
-
         let result = router.lookup(&Ipv4Addr::new(192, 168, 0, 5));
 
         assert_eq!(result, vec![endpoint_id]);
@@ -249,11 +238,6 @@ mod tests {
 
         router.insert_route(subnet_address.clone(), endpoint_id1);
         router.insert_route(subnet_address.clone(), endpoint_id2);
-
-        let address_in_subnet = Route {
-            address: Ipv4Addr::new(192, 168, 0, 2),
-            subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
-        };
 
         let result = router.lookup(&Ipv4Addr::new(192, 168, 0, 5));
 

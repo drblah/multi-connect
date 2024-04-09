@@ -163,8 +163,6 @@ impl PacketSorter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
-    use crate::messages::Packet;
     #[test]
     fn sorter_handles_out_of_order_packets() {
         smol::block_on(async {

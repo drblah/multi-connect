@@ -630,7 +630,7 @@ mod tests {
 
             // The connections should now be in connected state
 
-            for (conn_addr, connection) in &conman.endpoints.iter().next().unwrap().1.connections {
+            for (_conn_addr, connection) in &conman.endpoints.iter().next().unwrap().1.connections {
                 assert_eq!(connection.state, ConnectionState::Connected)
             }
         });
