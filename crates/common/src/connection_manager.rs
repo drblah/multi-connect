@@ -575,7 +575,8 @@ mod tests {
                 serialized,
                 server_id,
                 server_address,
-                ("lo".to_string(), own_address)
+                ("lo".to_string(), own_address),
+                &mut None
             ).await;
 
             // The connection should now be in connected state
@@ -623,7 +624,8 @@ mod tests {
                 serialized,
                 server_id,
                 server_address,
-                ("lo".to_string(), own_address)
+                ("lo".to_string(), own_address),
+                &mut None
             ).await;
 
             // The connections should now be in connected state
