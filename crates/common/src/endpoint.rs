@@ -31,6 +31,11 @@ pub struct Endpoint {
     pub hello_ack_path_latency: PathLatency
 }
 
+pub struct ReadInfo {
+    pub connection_read_info: crate::connection::ReadInfo,
+    pub endpoint_id: EndpointId
+}
+
 impl Endpoint {
     pub fn new(id: EndpointId, session_id: Uuid, packet_sorter_deadline: u64) -> Self {
         Endpoint {
@@ -103,7 +108,7 @@ impl Endpoint {
         }
     }
 
-    pub async fn await_connections(&self) -> Result<(EndpointId, Vec<u8>, SocketAddr, (String, SocketAddr))> {
+    pub async fn await_connections(&self) -> Result<ReadInfo> {
         let mut futures = Vec::new();
 
         for (_, connection) in self.connections.iter() {
@@ -114,7 +119,12 @@ impl Endpoint {
 
         let item_resolved = item_resolved?;
 
-        Ok((self.id, item_resolved.0, item_resolved.1, item_resolved.2))
+        let read_info = ReadInfo {
+            connection_read_info: item_resolved,
+            endpoint_id: self.id
+        };
+
+        Ok(read_info)
     }
 
     pub async fn await_connection_timeouts(&self) -> (EndpointId, String, SocketAddr) {

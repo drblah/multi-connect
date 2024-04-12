@@ -29,6 +29,13 @@ pub struct Connection {
     peer_addr: SocketAddr
 }
 
+pub struct ReadInfo {
+    pub packet_bytes: Vec<u8>,
+    pub source_address: SocketAddr,
+    pub interface_name: String
+}
+
+
 impl Connection {
     pub fn new(socket: UdpSocket, interface_name: Option<String>, connection_timeout: u64) -> Connection {
         let destination_socket_addr = socket.peer_addr().unwrap();
@@ -52,11 +59,17 @@ impl Connection {
         deadline_lock.set_after(Duration::from_secs(10));
     }
 
-    pub async fn read(&self) -> Result<(Vec<u8>, SocketAddr, (String, SocketAddr))> {
+    pub async fn read(&self) -> Result<ReadInfo> {
         let mut buffer_lock = self.buffer.lock().await;
         let message_length = self.socket.recv(buffer_lock.as_mut_slice()).await?;
 
-        Ok((buffer_lock[..message_length].to_vec(), self.peer_addr, self.get_name_address_touple()))
+        let read_info = ReadInfo {
+            packet_bytes: buffer_lock[..message_length].to_vec(),
+            source_address: self.peer_addr,
+            interface_name: self.get_interface_name().to_string()
+        };
+
+        Ok(read_info)
     }
 
     /// write attempts to send a packet to the connected endpoint over the Connection's network interface.

@@ -1,4 +1,4 @@
-use common::{connection_manager, ConnectionInfo, settings};
+use common::{connection_manager, ConnectionInfo, endpoint, settings};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 use anyhow::Result;
@@ -22,7 +22,7 @@ struct Args {
 }
 
 enum Events {
-    NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr, (String, SocketAddr))>),
+    NewEstablishedMessage(Result<endpoint::ReadInfo>),
     ConnectionTimeout((EndpointId, String, SocketAddr)),
     PacketSorter(EndpointId),
     TunnelPacket(std::io::Result<usize>),
@@ -155,9 +155,11 @@ fn main() {
                     .await
                 {
                     Events::NewEstablishedMessage(result) => match result {
-                        Ok((endpointid, message, source_address, receiver_interface)) => {
+                        Ok(read_info) => {
                             //info!("Endpoint: {}, produced message: {:?}", endpointid, message);
-                            connection_manager.handle_established_message(message, endpointid, source_address, receiver_interface, &mut interface_logger).await;
+                            connection_manager.handle_established_message(
+                                read_info,
+                                &mut interface_logger).await;
 
                         }
                         Err(e) => {

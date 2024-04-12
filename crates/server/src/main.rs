@@ -12,7 +12,7 @@ use smol::stream::StreamExt;
 use tokio_tun::{TunBuilder};
 use common::interface_logger::InterfaceLogger;
 use common::packet_sorter_log::PacketSorterLogger;
-use common::settings;
+use common::{endpoint, settings};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
@@ -26,7 +26,7 @@ struct Args {
 
 enum Events {
     NewConnection((usize, SocketAddr)),
-    NewEstablishedMessage(Result<(EndpointId, Vec<u8>, SocketAddr, (String, SocketAddr))>),
+    NewEstablishedMessage(Result<endpoint::ReadInfo>),
     ConnectionTimeout((EndpointId, String, SocketAddr)),
     PacketSorter(EndpointId),
     TunnelPacket(std::io::Result<usize>),
@@ -152,9 +152,11 @@ fn main() {
                         conman.handle_hello(udp_buffer[..len].to_vec(), addr, server_interface_name.clone()).await;
                     }
                     Events::NewEstablishedMessage(result) => match result {
-                        Ok((endpointid, message, source_address, receiver_interface)) => {
+                        Ok(read_info) => {
                             //info!("Endpoint: {}, produced message: {:?}", endpointid, message);
-                            conman.handle_established_message(message, endpointid, source_address, receiver_interface, &mut interface_logger).await;
+                            conman.handle_established_message(
+                                read_info,
+                                &mut interface_logger).await;
 
                         }
                         Err(e) => {

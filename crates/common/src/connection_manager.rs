@@ -10,7 +10,7 @@ use log::{debug, error, info, warn};
 use tokio_tun::Tun;
 use uuid::Uuid;
 use crate::endpoint::Endpoint;
-use crate::{ConnectionInfo, make_socket, messages};
+use crate::{ConnectionInfo, endpoint, make_socket, messages};
 use crate::interface_logger::InterfaceLogger;
 use crate::router::{Route, Router};
 
@@ -110,13 +110,13 @@ impl ConnectionManager {
         }
     }
 
-    pub async fn handle_established_message(&mut self, message: Vec<u8>, endpoint_id: EndpointId, source_address: SocketAddr, receiver_interface: (String, SocketAddr), interface_logger: &mut Option<InterfaceLogger>) {
-        if let Ok(decoded) = bincode::deserialize::<Messages>(&message) {
+    pub async fn handle_established_message(&mut self, read_info: endpoint::ReadInfo, interface_logger: &mut Option<InterfaceLogger>) {
+        if let Ok(decoded) = bincode::deserialize::<Messages>(&read_info.connection_read_info.packet_bytes) {
             match decoded {
                 Messages::Packet(packet) => {
-                    if let Some(endpoint) = self.endpoints.get_mut(&endpoint_id) {
+                    if let Some(endpoint) = self.endpoints.get_mut(&read_info.endpoint_id) {
                         if let Some(interface_logger) = interface_logger {
-                            interface_logger.add_log_line(endpoint_id, packet.seq, receiver_interface.0.clone()).await;
+                            interface_logger.add_log_line(read_info.endpoint_id, packet.seq, read_info.connection_read_info.interface_name).await;
                         }
 
                         endpoint.packet_sorter.insert_packet(packet).await;
@@ -125,7 +125,7 @@ impl ConnectionManager {
                 Messages::Hello(hello) => {
                     if let Some(endpoint) = self.endpoints.get_mut(&hello.id) {
                         endpoint.hello_path_latency.insert_new_timestamp(hello.hello_seq);
-                        endpoint.add_connection(source_address, receiver_interface.0, self.local_address, self.connection_timeout).await.unwrap();
+                        endpoint.add_connection(read_info.connection_read_info.source_address, read_info.connection_read_info.interface_name, self.local_address, self.connection_timeout).await.unwrap();
                         endpoint.acknowledge( self.own_id, endpoint.session_id, &self.own_static_routes).await;
                         debug!("Hello latency-diff: {:.2} - Hello-ack latency-diff: {:.2}", endpoint.hello_path_latency.estimate_path_delay_difference().as_millis(), endpoint.hello_ack_path_latency.estimate_path_delay_difference().as_millis())
                     } else {
@@ -149,7 +149,7 @@ impl ConnectionManager {
                         }
 
                         for (key, connection) in self.endpoints.get_mut(&hello_ack.id).unwrap().connections.iter_mut() {
-                            if key.1 == source_address && *key.0 == receiver_interface.0 {
+                            if key.1 == read_info.connection_read_info.source_address && *key.0 == read_info.connection_read_info.interface_name {
                                 if connection.state == crate::connection::ConnectionState::Startup {
                                     connection.state = crate::connection::ConnectionState::Connected;
                                 }
@@ -284,7 +284,7 @@ impl ConnectionManager {
         self.endpoints.len() != 0
     }
 
-    pub async fn await_incoming(&self) -> Result<(EndpointId, Vec<u8>, SocketAddr, (String, SocketAddr))> {
+    pub async fn await_incoming(&self) -> Result<endpoint::ReadInfo> {
         let mut futures = Vec::new();
 
         for (_, endpoint) in self.endpoints.iter() {
@@ -454,7 +454,7 @@ mod tests {
     use std::net::SocketAddr;
     use uuid::Uuid;
     use crate::connection::ConnectionState;
-    use crate::messages;
+    use crate::{connection, endpoint, messages};
     use crate::connection_manager::ConnectionManager;
     use crate::messages::{HelloAck, Messages};
 
@@ -570,12 +570,18 @@ mod tests {
 
             let serialized = bincode::serialize(&ack_message).unwrap();
 
+            let read_info = endpoint::ReadInfo {
+                connection_read_info: connection::ReadInfo {
+                    packet_bytes: serialized,
+                    source_address: server_address,
+                    interface_name: "lo".to_string(),
+                },
+                endpoint_id: server_id,
+            };
+
 
             conman.handle_established_message(
-                serialized,
-                server_id,
-                server_address,
-                ("lo".to_string(), own_address),
+                read_info,
                 &mut None
             ).await;
 
@@ -619,12 +625,18 @@ mod tests {
 
             let serialized = bincode::serialize(&ack_message).unwrap();
 
+            let read_info = endpoint::ReadInfo {
+                connection_read_info: connection::ReadInfo {
+                    packet_bytes: serialized,
+                    source_address: server_address,
+                    interface_name: "lo".to_string(),
+                },
+                endpoint_id: server_id,
+            };
+
 
             conman.handle_established_message(
-                serialized,
-                server_id,
-                server_address,
-                ("lo".to_string(), own_address),
+                read_info,
                 &mut None
             ).await;
 
