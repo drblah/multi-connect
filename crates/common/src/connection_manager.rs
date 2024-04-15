@@ -9,7 +9,7 @@ use etherparse::{InternetSlice, SlicedPacket};
 use log::{debug, error, info, warn};
 use tokio_tun::Tun;
 use uuid::Uuid;
-use crate::endpoint::Endpoint;
+use crate::endpoint::{ConnectionEntry, Endpoint};
 use crate::{ConnectionInfo, endpoint, make_socket, messages};
 use crate::interface_logger::InterfaceLogger;
 use crate::router::{Route, Router};
@@ -148,14 +148,14 @@ impl ConnectionManager {
                             }
                         }
 
-                        for (key, connection) in self.endpoints.get_mut(&hello_ack.id).unwrap().connections.iter_mut() {
-                            if key.1 == read_info.connection_read_info.source_address && *key.0 == read_info.connection_read_info.interface_name {
-                                if connection.state == crate::connection::ConnectionState::Startup {
-                                    connection.state = crate::connection::ConnectionState::Connected;
+                        for connection_entry in self.endpoints.get_mut(&hello_ack.id).unwrap().connections.iter_mut() {
+                            if connection_entry.interface_address == read_info.connection_read_info.source_address && connection_entry.interface_name == read_info.connection_read_info.interface_name {
+                                if connection_entry.connection.state == crate::connection::ConnectionState::Startup {
+                                    connection_entry.connection.state = crate::connection::ConnectionState::Connected;
                                 }
 
-                                if connection.state == crate::connection::ConnectionState::Connected {
-                                    connection.reset_hello_timeout().await;
+                                if connection_entry.connection.state == crate::connection::ConnectionState::Connected {
+                                    connection_entry.connection.reset_hello_timeout().await;
                                 }
                             }
                         }
@@ -202,7 +202,14 @@ impl ConnectionManager {
         new_socket.send(&encoded).await?;
         let mut new_connection = crate::connection::Connection::new(new_socket, Some(interface_name.clone()), self.connection_timeout);
         new_connection.state = crate::connection::ConnectionState::Startup;
-        new_endpoint.connections.push(((interface_name, destination_address), new_connection));
+
+        let connection_entry = ConnectionEntry {
+            interface_name,
+            interface_address: destination_address,
+            connection: new_connection,
+        };
+
+        new_endpoint.connections.push(connection_entry);
 
         Ok(())
     }
@@ -256,16 +263,16 @@ impl ConnectionManager {
 
 
                 // Send to endpoint
-                for (key, connection) in &mut endpoint.connections {
-                    match connection.write(serialized_pakcet.clone()).await {
+                for connection_entry in &mut endpoint.connections {
+                    match connection_entry.connection.write(serialized_pakcet.clone()).await {
                         Ok(_len) => {
                             continue
                         }
                         Err(e) => {
                             match e.kind() {
                                 std::io::ErrorKind::ConnectionRefused => {
-                                    error!("Connection refused. Removing connection: {}, {}", key.0, key.1);
-                                    connection.state = crate::connection::ConnectionState::Disconnected;
+                                    error!("Connection refused. Removing connection: {}, {}", connection_entry.interface_name, connection_entry.interface_address);
+                                    connection_entry.connection.state = crate::connection::ConnectionState::Disconnected;
                                 }
                                 _ => {
                                     error!("Error while writing to socket: {}", e.to_string());
@@ -332,7 +339,7 @@ impl ConnectionManager {
                 "Removing Connection: {} from Endpoint: {}",
                 id, address
             );
-            if let Some(index) = endpoint.connections.iter().position(|(key, _)| key.0 == interface_name && key.1 == address ) {
+            if let Some(index) = endpoint.connections.iter().position(|connection_entry| connection_entry.interface_name == interface_name && connection_entry.interface_address == address ) {
                 endpoint.connections.remove(index);
             }
         }
@@ -359,9 +366,9 @@ impl ConnectionManager {
         let mut to_be_removed = Vec::new();
 
         for (endpoint_id, endpoint) in &self.endpoints {
-            for (address, connection) in &endpoint.connections {
-                if connection.state == crate::connection::ConnectionState::Disconnected {
-                    to_be_removed.push((endpoint_id.clone(), address.clone()));
+            for connection_entry in &endpoint.connections {
+                if connection_entry.connection.state == crate::connection::ConnectionState::Disconnected {
+                    to_be_removed.push((endpoint_id.clone(), (connection_entry.interface_name.clone(), connection_entry.interface_address.clone())));
                 }
             }
         }
@@ -398,17 +405,17 @@ impl ConnectionManager {
             endpoint.hello_counter.add_assign(1);
             let encoded = bincode::serialize(&hello).unwrap();
 
-            for (_key, connection) in &mut endpoint.connections {
-                if connection.state == crate::connection::ConnectionState::Connected || connection.state == crate::connection::ConnectionState::Startup {
-                    info!("Greeting on connection: {:?}", connection.get_name_address_touple());
+            for connection_entry in &mut endpoint.connections {
+                if connection_entry.connection.state == crate::connection::ConnectionState::Connected || connection_entry.connection.state == crate::connection::ConnectionState::Startup {
+                    info!("Greeting on connection: {:?}", connection_entry.connection.get_name_address_touple());
 
-                    match connection.write(encoded.clone()).await {
+                    match connection_entry.connection.write(encoded.clone()).await {
                         Ok(_) => {}
                         Err(e) => {
                             match e.kind() {
                                 std::io::ErrorKind::NetworkUnreachable => {
-                                    error!("Network unreachable. Removing connection: {}, {}", _key.0, _key.1);
-                                    connection.state = crate::connection::ConnectionState::Disconnected;
+                                    error!("Network unreachable. Removing connection: {}, {}", connection_entry.interface_name, connection_entry.interface_address);
+                                    connection_entry.connection.state = crate::connection::ConnectionState::Disconnected;
                                 }
                                 _ => { error!("Connection encountered unhandled error: {}", e) }
                             }
@@ -586,7 +593,7 @@ mod tests {
             ).await;
 
             // The connection should now be in connected state
-            let connection_status = &conman.endpoints.iter().next().unwrap().1.connections.first().unwrap().1.state;
+            let connection_status = &conman.endpoints.iter().next().unwrap().1.connections.first().unwrap().connection.state;
             assert_eq!(*connection_status, ConnectionState::Connected);
 
         });
@@ -641,9 +648,8 @@ mod tests {
             ).await;
 
             // The connections should now be in connected state
-
-            for (_conn_addr, connection) in &conman.endpoints.iter().next().unwrap().1.connections {
-                assert_eq!(connection.state, ConnectionState::Connected)
+            for connection_entity in &conman.endpoints.iter().next().unwrap().1.connections {
+                assert_eq!(connection_entity.connection.state, ConnectionState::Connected)
             }
         });
     }

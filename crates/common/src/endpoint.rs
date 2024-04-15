@@ -15,6 +15,13 @@ use crate::packet_sorter::PacketSorter;
 use crate::path_latency::PathLatency;
 use crate::router::Route;
 
+#[derive(Debug)]
+pub struct ConnectionEntry {
+    pub interface_name: String,
+    pub interface_address: SocketAddr,
+    pub connection: Connection
+}
+
 /// Endpoint represents a remote peer instance of multi-connect. It consists mainly of a list of
 /// Connections, an EndpointId (which must be globally unique amongst all connected Endpoints), and
 /// a session ID, which is randomly generated every time an Endpoint is created.
@@ -22,7 +29,7 @@ use crate::router::Route;
 pub struct Endpoint {
     pub id: EndpointId,
     pub session_id: Uuid,
-    pub connections: Vec<((String, SocketAddr), Connection)>,
+    pub connections: Vec<ConnectionEntry>,
     pub tx_counter: u64,
     pub hello_counter: u64,
     pub hello_ack_counter:u64,
@@ -59,9 +66,9 @@ impl Endpoint {
         connection_timeout: u64
     ) -> Result<(), std::io::Error> {
         // We already know the connection, so we update the last seen time
-        if let Some((_address, connection)) = self.connections.iter_mut().find(|((name, addr), _)| *addr == source_address && *name == interface_name) {
+        if let Some(connection_entry) = self.connections.iter_mut().find(|connection_entry| connection_entry.interface_address == source_address && *connection_entry.interface_name == interface_name) {
             info!("Reset hello timeout for {}", source_address);
-            connection.reset_hello_timeout().await;
+            connection_entry.connection.reset_hello_timeout().await;
         } else {
             let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
             socket.set_reuse_address(true)?;
@@ -79,7 +86,13 @@ impl Endpoint {
             // TODO: Figure out if we need to handle this case
             let new_connection = Connection::new(socket, None, connection_timeout);
 
-            self.connections.push(((interface_name, source_address), new_connection));
+            let connection_entry = ConnectionEntry {
+                interface_name,
+                interface_address: source_address,
+                connection: new_connection,
+            };
+
+            self.connections.push(connection_entry);
         }
 
         Ok(())
@@ -93,15 +106,15 @@ impl Endpoint {
 
         let serialized = bincode::serialize(&ack_message).unwrap();
 
-        for (key, connection) in &mut self.connections {
-            if connection.state == ConnectionState::Startup || connection.state == ConnectionState::Connected {
-                match connection.write(serialized.clone()).await {
+        for connection_entry in &mut self.connections {
+            if connection_entry.connection.state == ConnectionState::Startup || connection_entry.connection.state == ConnectionState::Connected {
+                match connection_entry.connection.write(serialized.clone()).await {
                     Ok(_) => {
-                        connection.state = ConnectionState::Connected;
+                        connection_entry.connection.state = ConnectionState::Connected;
                     }
                     Err(_) => {
-                        error!("Failed to send ACK to ({}, {}). Setting as Disconnected", key.0, key.1);
-                        connection.state = ConnectionState::Disconnected;
+                        error!("Failed to send ACK to ({}, {}). Setting as Disconnected", connection_entry.interface_name, connection_entry.interface_address);
+                        connection_entry.connection.state = ConnectionState::Disconnected;
                     }
                 }
             }
@@ -111,8 +124,8 @@ impl Endpoint {
     pub async fn await_connections(&self) -> Result<ReadInfo> {
         let mut futures = Vec::new();
 
-        for (_, connection) in self.connections.iter() {
-            futures.push(connection.read().boxed())
+        for connection_entry in self.connections.iter() {
+            futures.push(connection_entry.connection.read().boxed())
         }
 
         let (item_resolved, _ready_future_index, _remaining_futures) = select_all(futures).await;
@@ -130,8 +143,8 @@ impl Endpoint {
     pub async fn await_connection_timeouts(&self) -> (EndpointId, String, SocketAddr) {
         let mut futures = Vec::new();
 
-        for (_, connection) in self.connections.iter() {
-            futures.push(connection.await_connection_timeout().boxed())
+        for connection_entry in self.connections.iter() {
+            futures.push(connection_entry.connection.await_connection_timeout().boxed())
         }
 
         let (item_resolved, _ready_future_index, _remaining_futures) = select_all(futures).await;
@@ -159,8 +172,11 @@ impl Endpoint {
     pub fn get_alive_connections(&self) -> Vec<(String, SocketAddr)> {
         let mut alive_connections = Vec::new();
 
-        for connection in &self.connections {
-            alive_connections.push(connection.1.get_name_address_touple())
+        for connection_entry in &self.connections {
+            alive_connections.push((
+                                       connection_entry.interface_name.clone(), connection_entry.interface_address.clone()
+                                       )
+            )
         }
 
         alive_connections
