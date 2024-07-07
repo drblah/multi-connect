@@ -191,4 +191,20 @@ impl Endpoint {
 
         self.packet_sorter.set_deadline(deadline)
     }
+
+    pub fn disable_interface(&mut self, interface_name: &str) {
+        for connection in &mut self.connections {
+            if connection.interface_name == interface_name {
+                connection.connection.disable();
+            }
+        }
+    }
+
+    pub fn enable_interface(&mut self, interface_name: &str) {
+        for connection in &mut self.connections {
+            if connection.interface_name == interface_name {
+                connection.connection.enable();
+            }
+        }
+    }
 }

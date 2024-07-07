@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crate::messages::{EndpointId, Messages, Packet};
+use crate::messages::{DuplicationCommand, EndpointId, Messages, Packet};
 use futures::future::select_all;
 use smol::future::FutureExt;
 use std::collections::{HashMap};
@@ -164,6 +164,9 @@ impl ConnectionManager {
                         error!("Received HelloAck from unknown endpoint: {}", hello_ack.id);
                     }
 
+                }
+                Messages::DuplicationCommand(duplication_command) => {
+                    self.handle_selective_duplication_command(duplication_command)
                 }
             }
         }
@@ -447,6 +450,16 @@ impl ConnectionManager {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    pub fn handle_selective_duplication_command(&mut self, duplication_command: DuplicationCommand) {
+        for (_, ep) in &mut self.endpoints {
+            if duplication_command.enabled {
+                ep.enable_interface(&duplication_command.interface_name)
+            } else {
+                ep.disable_interface(&duplication_command.interface_name)
             }
         }
     }

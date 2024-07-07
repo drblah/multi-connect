@@ -26,7 +26,8 @@ pub struct Connection {
     connection_timeout: Mutex<smol::Timer>,
     pub state: ConnectionState,
     buffer: Mutex<[u8; 65535]>,
-    peer_addr: SocketAddr
+    peer_addr: SocketAddr,
+    enabled: bool
 }
 
 pub struct ReadInfo {
@@ -50,7 +51,8 @@ impl Connection {
             connection_timeout: Mutex::new(smol::Timer::after(Duration::from_millis(connection_timeout))),
             state: ConnectionState::Startup,
             buffer: Mutex::new([0; 65535]),
-            peer_addr: destination_socket_addr
+            peer_addr: destination_socket_addr,
+            enabled: true
         }
     }
 
@@ -121,5 +123,17 @@ impl Connection {
         } else {
             "DYN-interface".to_string()
         }
+    }
+
+    pub fn enable(&mut self) {
+        self.enabled = true
+    }
+
+    pub fn disable(&mut self) {
+        self.enabled = false
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
     }
 }
