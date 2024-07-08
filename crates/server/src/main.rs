@@ -7,7 +7,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 use async_compat::Compat;
 use clap::Parser;
-use log::{error, info};
+use log::{debug, error, info};
 use smol::stream::StreamExt;
 use tokio_tun::{TunBuilder};
 use common::interface_logger::InterfaceLogger;
@@ -32,7 +32,8 @@ enum Events {
     TunnelPacket(std::io::Result<usize>),
     NewSortedPacket((EndpointId, Option<Packet>)),
     #[allow(dead_code)]
-    FlushInterfaceLog(Option<Instant>)
+    FlushInterfaceLog(Option<Instant>),
+    DuplicationMessage((usize, SocketAddr))
 }
 
 
@@ -50,6 +51,10 @@ fn main() {
 
 
     smol::block_on(Compat::new (async {
+
+        // Command socket for selective duplication
+        let duplication_socket = smol::net::UdpSocket::bind("0.0.0.0:1234").await.unwrap();
+        let mut duplication_message_buffer = [0u8; 1500];
 
         let mut interface_logger = None;
         let mut packet_sorter_logger = None;
@@ -138,6 +143,9 @@ fn main() {
                 let wrapped_flush_interface_log = async {
                     Events::FlushInterfaceLog(flush_interface_log_timer.next().await)
                 };
+                let wrapped_duplication_socket = async {
+                    Events::DuplicationMessage(duplication_socket.recv_from(&mut duplication_message_buffer).await.unwrap())
+                };
 
                 match wrapped_server
                     .race(wrapped_endpoints)
@@ -146,6 +154,7 @@ fn main() {
                     .race(wrapped_tunnel_device)
                     .race(wrapped_new_sorted_packet)
                     .race(wrapped_flush_interface_log)
+                    .race(wrapped_duplication_socket)
                     .await
                 {
                     Events::NewConnection((len, addr)) => {
@@ -196,6 +205,11 @@ fn main() {
                         if let Some(packet_sorter_logger) = &mut packet_sorter_logger {
                             packet_sorter_logger.flush().await;
                         }
+                    }
+                    Events::DuplicationMessage((size, _addr)) => {
+                        let duplication_message = &duplication_message_buffer[..size];
+                        debug!("Duplication raw: {:?}", duplication_message);
+                        conman.handle_selective_duplication_command(duplication_message);
                     }
                 }
 
