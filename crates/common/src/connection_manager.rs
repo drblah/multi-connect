@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crate::messages::{DuplicationCommand, EndpointId, Messages, Packet};
+use crate::messages::{EndpointId, Messages, Packet};
 use futures::future::select_all;
 use smol::future::FutureExt;
 use std::collections::{HashMap};
@@ -165,8 +165,8 @@ impl ConnectionManager {
                     }
 
                 }
-                Messages::DuplicationCommand(duplication_command) => {
-                    self.handle_selective_duplication_command(duplication_command)
+                Messages::DuplicationCommand(_duplication_command) => {
+                    unimplemented!("We should never receive a duplication command over the tunnel interfaces")
                 }
             }
         }
@@ -267,22 +267,25 @@ impl ConnectionManager {
 
                 // Send to endpoint
                 for connection_entry in &mut endpoint.connections {
-                    match connection_entry.connection.write(serialized_pakcet.clone()).await {
-                        Ok(_len) => {
-                            continue
-                        }
-                        Err(e) => {
-                            match e.kind() {
-                                std::io::ErrorKind::ConnectionRefused => {
-                                    error!("Connection refused. Removing connection: {}, {}", connection_entry.interface_name, connection_entry.interface_address);
-                                    connection_entry.connection.state = crate::connection::ConnectionState::Disconnected;
-                                }
-                                _ => {
-                                    error!("Error while writing to socket: {}", e.to_string());
+                    if connection_entry.connection.is_enabled() {
+                        match connection_entry.connection.write(serialized_pakcet.clone()).await {
+                            Ok(_len) => {
+                                continue
+                            }
+                            Err(e) => {
+                                match e.kind() {
+                                    std::io::ErrorKind::ConnectionRefused => {
+                                        error!("Connection refused. Removing connection: {}, {}", connection_entry.interface_name, connection_entry.interface_address);
+                                        connection_entry.connection.state = crate::connection::ConnectionState::Disconnected;
+                                    }
+                                    _ => {
+                                        error!("Error while writing to socket: {}", e.to_string());
+                                    }
                                 }
                             }
                         }
                     }
+
                 }
             }
         } else {
@@ -454,12 +457,19 @@ impl ConnectionManager {
         }
     }
 
-    pub fn handle_selective_duplication_command(&mut self, duplication_command: DuplicationCommand) {
-        for (_, ep) in &mut self.endpoints {
-            if duplication_command.enabled {
-                ep.enable_interface(&duplication_command.interface_name)
-            } else {
-                ep.disable_interface(&duplication_command.interface_name)
+    pub fn handle_selective_duplication_command(&mut self, duplication_command_bytes: &[u8]) {
+        if let Ok(duplication_command) = bincode::deserialize::<Messages>(duplication_command_bytes) {
+            if let Messages::DuplicationCommand(duplication_command) = duplication_command {
+                info!("Received duplication command: {:?}", duplication_command);
+                for (_, ep) in &mut self.endpoints {
+                    if duplication_command.enabled {
+                        info!("Enabling interface: {}", duplication_command.interface_name);
+                        ep.enable_interface(&duplication_command.interface_name)
+                    } else {
+                        info!("Disabling interface: {}", duplication_command.interface_name);
+                        ep.disable_interface(&duplication_command.interface_name)
+                    }
+                }
             }
         }
     }
