@@ -1,6 +1,6 @@
-use std::net::IpAddr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use crate::router::Route;
 
 pub type EndpointId = u16;
 
@@ -16,19 +16,22 @@ pub struct Packet {
 pub struct Hello {
     pub id: EndpointId,
     pub session_id: Uuid,
-    pub tun_address: IpAddr
+    pub static_routes: Option<Vec<Route>>,
+    pub hello_seq: u64
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct HelloAck {
     pub id: EndpointId,
     pub session_id: Uuid,
-    pub tun_address: IpAddr
+    pub static_routes: Option<Vec<Route>>,
+    pub hello_ack_seq: u64
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct KeepAlive {
-    pub id: EndpointId,
+pub struct DuplicationCommand {
+    pub interface_name: String,
+    pub enabled: bool
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -36,5 +39,6 @@ pub enum Messages {
     Packet(Packet),
     Hello(Hello),
     HelloAck(HelloAck),
-    KeepAlive(KeepAlive),
+    DuplicationCommand(DuplicationCommand)
 }
+
