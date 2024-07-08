@@ -28,7 +28,8 @@ enum Events {
     TunnelPacket(std::io::Result<usize>),
     #[allow(dead_code)]
     SendKeepalive(Option<Instant>),
-    NewSortedPacket((EndpointId, Option<Packet>))
+    NewSortedPacket((EndpointId, Option<Packet>)),
+    DuplicationMessage((usize, SocketAddr))
 }
 
 fn main() {
@@ -42,6 +43,10 @@ fn main() {
     info!("Using config: {:?}", settings);
 
     smol::block_on(Compat::new(async {
+
+        // Command socket for selective duplication
+        let duplication_socket = smol::net::UdpSocket::bind("0.0.0.0:1234").await.unwrap();
+        let mut duplication_message_buffer = [0u8; 1500];
 
         let mut interface_logger = None;
         let mut packet_sorter_logger = None;
@@ -143,6 +148,9 @@ fn main() {
                 let wrapped_new_sorted_packet = async {
                     Events::NewSortedPacket(connection_manager.await_endpoint_sorted_packets().await)
                 };
+                let wrapped_duplication_socket = async {
+                    Events::DuplicationMessage(duplication_socket.recv_from(&mut duplication_message_buffer).await.unwrap())
+                };
 
                 match wrapped_keepalive_timer
                     .or(
@@ -151,6 +159,7 @@ fn main() {
                         .race(wrapped_tunnel_device)
                         .race(wrapped_endpoints)
                         .race(wrapped_new_sorted_packet)
+                        .race(wrapped_duplication_socket)
                     )
                     .await
                 {
@@ -205,6 +214,11 @@ fn main() {
 
                             tun.send(packet.bytes.as_slice()).await.unwrap();
                         }
+                    }
+                    Events::DuplicationMessage((size, _addr)) => {
+                        let duplication_message = &duplication_message_buffer[..size];
+                        debug!("Duplication raw: {:?}", duplication_message);
+                        connection_manager.handle_selective_duplication_command(duplication_message);
                     }
                 }
                 connection_manager.remove_disconnected();
