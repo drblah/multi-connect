@@ -1,0 +1,8 @@
+cff-version: 1.2.0
+message: "If you like this software, and find it useful, please cite it as below."
+authors:
+- family-names: "Bro Damsgaard"
+  given-names: "Sebastian"
+  orcid: "https://orcid.org/0000-0002-0078-8673"
+title: "multi-connect - The open source multi-path connectivity tool"
+url: "https://github.com/drblah/multi-connect"
