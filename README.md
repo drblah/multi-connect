@@ -1,4 +1,4 @@
-# mpconn
+# Multi-connect
 multi-connect is a flexible multi connectivity tunneling tool. 
 
 ## What is multi connectivity?
