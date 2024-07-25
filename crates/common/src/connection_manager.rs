@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crate::messages::{EndpointId, Messages, Packet};
+use crate::messages::{DuplicationCommands, EndpointId, Messages, Packet};
 use futures::future::select_all;
 use smol::future::FutureExt;
 use std::collections::{HashMap};
@@ -164,9 +164,6 @@ impl ConnectionManager {
                         error!("Received HelloAck from unknown endpoint: {}", hello_ack.id);
                     }
 
-                }
-                Messages::DuplicationCommand(_duplication_command) => {
-                    unimplemented!("We should never receive a duplication command over the tunnel interfaces")
                 }
             }
         }
@@ -458,18 +455,26 @@ impl ConnectionManager {
     }
 
     pub fn handle_selective_duplication_command(&mut self, duplication_command_bytes: &[u8]) {
-        if let Ok(duplication_command) = bincode::deserialize::<Messages>(duplication_command_bytes) {
-            if let Messages::DuplicationCommand(duplication_command) = duplication_command {
-                info!("Received duplication command: {:?}", duplication_command);
-                for (_, ep) in &mut self.endpoints {
-                    if duplication_command.enabled {
-                        info!("Enabling interface: {}", duplication_command.interface_name);
-                        ep.enable_interface(&duplication_command.interface_name)
-                    } else {
-                        info!("Disabling interface: {}", duplication_command.interface_name);
-                        ep.disable_interface(&duplication_command.interface_name)
+
+        match serde_json::from_slice(duplication_command_bytes) {
+            Ok(duplication_command) => {
+                match duplication_command {
+                    DuplicationCommands::InterfaceState(state) => {
+                        info!("Received duplication command: {:?}", state);
+                        for (_, ep) in &mut self.endpoints {
+                            if state.enabled {
+                                info!("Enabling interface: {}", state.interface_name);
+                                ep.enable_interface(&state.interface_name)
+                            } else {
+                                info!("Disabling interface: {}", state.interface_name);
+                                ep.disable_interface(&state.interface_name)
+                            }
+                        }
                     }
                 }
+            }
+            Err(e) => {
+                error!("Got a duplication command, but failed to decode: {}", e)
             }
         }
     }

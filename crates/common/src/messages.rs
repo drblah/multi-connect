@@ -29,16 +29,19 @@ pub struct HelloAck {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct DuplicationCommand {
+pub enum Messages {
+    Packet(Packet),
+    Hello(Hello),
+    HelloAck(HelloAck)
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct InterfaceState {
     pub interface_name: String,
     pub enabled: bool
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub enum Messages {
-    Packet(Packet),
-    Hello(Hello),
-    HelloAck(HelloAck),
-    DuplicationCommand(DuplicationCommand)
+#[derive(Deserialize, Debug, Clone)]
+pub enum DuplicationCommands {
+    InterfaceState(InterfaceState)
 }
-
