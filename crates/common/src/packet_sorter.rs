@@ -1,14 +1,21 @@
 use std::collections::BTreeMap;
 use smol::lock::Mutex;
-use std::time::{Duration};
+use std::time::{Duration, Instant};
 use log::{debug, error};
 use smol::channel::TrySendError;
 use smol::stream::StreamExt;
 use crate::messages::Packet;
 
 #[derive(Debug)]
+struct QueuedPacket {
+    packet: Packet,
+    timestamp: Instant
+}
+
+
+#[derive(Debug)]
 pub struct PacketSorter {
-    packet_queue: BTreeMap<u64, Packet>,
+    packet_queue: BTreeMap<u64, QueuedPacket>,
     pub next_seq: u64,
 
     deadline: Duration,
@@ -41,7 +48,7 @@ impl PacketSorter {
                 let mut deadline_lock = self.deadline_timer.lock().await;
                 deadline_lock.set_after(self.deadline);
 
-                return Some(pkt)
+                return Some(pkt.packet)
             }
         }
 
@@ -59,30 +66,34 @@ impl PacketSorter {
     }
 
     pub async fn insert_packet(&mut self, pkt: Packet) {
-        if pkt.seq >= self.next_seq {
+        let sequence_number = pkt.seq;
+        if sequence_number >= self.next_seq {
+            let queued_packet = QueuedPacket {
+                packet: pkt,
+                timestamp: Instant::now()
+            };
             match self.packet_queue.last_entry() {
                 Some(tail) => {
-                    match pkt.seq.checked_sub(*tail.key()) {
+                    match sequence_number.checked_sub(*tail.key()) {
                         Some(diff) if diff > 100 => {
-                            debug!("Large sequence jump detected. Clear packet queue and insert packet: from {} to {} - {}", *tail.key(), pkt.seq, pkt.seq - *tail.key());
-                            //self.packet_queue.clear();
-                            self.packet_queue.entry(pkt.seq)
-                                .or_insert(pkt);
+                            debug!("Large sequence jump detected. Clear packet queue and insert packet: from {} to {} - {}", *tail.key(), sequence_number, sequence_number - *tail.key());
+                            self.packet_queue.entry(sequence_number)
+                                .or_insert(queued_packet);
                             self.advance_queue().await;
                         },
                         Some(_) => {
-                            self.packet_queue.entry(pkt.seq)
-                                .or_insert(pkt);
+                            self.packet_queue.entry(sequence_number)
+                                .or_insert(queued_packet);
                         },
                         None => {
-                            self.packet_queue.entry(pkt.seq)
-                                .or_insert(pkt);
+                            self.packet_queue.entry(sequence_number)
+                                .or_insert(queued_packet);
                         },
                     }
                 },
                 None => {
-                    self.packet_queue.entry(pkt.seq)
-                        .or_insert(pkt);
+                    self.packet_queue.entry(sequence_number)
+                        .or_insert(queued_packet);
                 },
             }
 
@@ -125,8 +136,25 @@ impl PacketSorter {
                 let mut deadline_timer_lock = self.deadline_timer.lock().await;
                 *deadline_timer_lock = smol::Timer::never();
             } else {
-                let mut deadline_timer_lock = self.deadline_timer.lock().await;
-                deadline_timer_lock.set_after(self.deadline)
+                // We have already checked if something is in the queue, so it is safe to unwrap here.
+                let next_timestamp = self.packet_queue
+                    .first_entry()
+                    .unwrap()
+                    .get()
+                    .timestamp;
+
+                let time_waited_in_queue = next_timestamp.elapsed();
+                // Fire instantly because the next packet has already waited long enough
+                if time_waited_in_queue >= self.deadline {
+                    let mut deadline_timer_lock = self.deadline_timer.lock().await;
+                    deadline_timer_lock.set_after(Duration::from_secs(0))
+                } else {
+
+
+                    let mut deadline_timer_lock = self.deadline_timer.lock().await;
+                    deadline_timer_lock.set_after(self.deadline - time_waited_in_queue)
+                }
+
             }
 
         } else {
