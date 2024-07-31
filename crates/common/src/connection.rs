@@ -23,6 +23,7 @@ pub struct Connection {
     #[allow(dead_code)]
     local_address: SocketAddr,
 
+    connection_timeout_duration: Duration,
     connection_timeout: Mutex<smol::Timer>,
     pub state: ConnectionState,
     buffer: Mutex<[u8; 65535]>,
@@ -48,6 +49,7 @@ impl Connection {
             std_socket,
             interface_name,
             local_address,
+            connection_timeout_duration: Duration::from_millis(connection_timeout),
             connection_timeout: Mutex::new(smol::Timer::after(Duration::from_millis(connection_timeout))),
             state: ConnectionState::Startup,
             buffer: Mutex::new([0; 65535]),
@@ -58,7 +60,7 @@ impl Connection {
 
     pub async fn reset_hello_timeout(&mut self) {
         let mut deadline_lock = self.connection_timeout.lock().await;
-        deadline_lock.set_after(Duration::from_secs(10));
+        deadline_lock.set_after(self.connection_timeout_duration);
     }
 
     pub async fn read(&self) -> Result<ReadInfo> {
