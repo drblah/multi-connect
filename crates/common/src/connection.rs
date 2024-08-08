@@ -1,3 +1,4 @@
+use std::mem;
 use std::net::{SocketAddr};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::time::Duration;
@@ -18,7 +19,7 @@ pub enum ConnectionState {
 #[derive(Debug)]
 pub struct Connection {
     socket: UdpSocket,
-    std_socket: std::net::UdpSocket,
+    std_socket: Option<std::net::UdpSocket>,
     interface_name: Option<String>,
     #[allow(dead_code)]
     local_address: SocketAddr,
@@ -41,9 +42,13 @@ pub struct ReadInfo {
 impl Connection {
     pub fn new(socket: UdpSocket, interface_name: Option<String>, connection_timeout: u64) -> Connection {
         let destination_socket_addr = socket.peer_addr().unwrap();
-        let std_socket = unsafe { std::net::UdpSocket::from_raw_fd(socket.clone().as_raw_fd()) };
-        let local_address = std_socket.local_addr().unwrap();
+        let local_address = socket.local_addr().unwrap();
 
+        // This is a raw copy of the smol socket so we can call non blocking send and get instant info
+        // if the underlying driver is actually ready to receive or not. **NOTE** we do some weird trickery
+        // with manually implementing Drop to prevent from being closed twice when the smol socket is closed.
+        let std_socket = unsafe { Some(std::net::UdpSocket::from_raw_fd(socket.clone().as_raw_fd()))};
+        
         Connection {
             socket,
             std_socket,
@@ -56,6 +61,7 @@ impl Connection {
             peer_addr: destination_socket_addr,
             enabled: true
         }
+        
     }
 
     pub async fn reset_hello_timeout(&mut self) {
@@ -81,19 +87,25 @@ impl Connection {
     /// necessary to ensure that write never blocks. A block here would cause the whole event loop to block
     /// as well.
     pub async fn write(&self, packet: Vec<u8>) -> std::io::Result<usize> {
-        match self.std_socket.send(&packet) {
-            Ok(send_bytes) => { Ok(send_bytes)}
-            Err(e) => {
-                match e.kind() {
-                    std::io::ErrorKind::WouldBlock => {
-                        debug!("Write call on {:?} would have blocked", self.get_name_address_touple());
-                        Ok(0)
-                    }
-                    _ => {
-                        Err(e)
+        if let Some(std_socket) = &self.std_socket {
+            match std_socket.send(&packet) {
+                Ok(send_bytes) => {
+                    Ok(send_bytes)
+                }
+                Err(e) => {
+                    match e.kind() {
+                        std::io::ErrorKind::WouldBlock => {
+                            debug!("Write call on {:?} would have blocked", self.get_name_address_touple());
+                            Ok(0)
+                        }
+                        _ => {
+                            Err(e)
+                        }
                     }
                 }
             }
+        } else {
+            unreachable!("No socket available!")
         }
     }
 
@@ -137,5 +149,15 @@ impl Connection {
 
     pub fn is_enabled(&self) -> bool {
         self.enabled
+    }
+}
+
+// Super weird mystery trickery to fix annoying drivers ;;;(((
+// dont worry about it trust me bro forget about it :>>>
+impl Drop for Connection {
+    fn drop(&mut self) {
+        let fd = self.std_socket.take();
+
+        mem::forget(fd)
     }
 }
