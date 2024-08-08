@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use smol::lock::Mutex;
 use std::time::{Duration, Instant};
 use log::{debug, error};
-use smol::channel::TrySendError;
+use smol::channel::{TrySendError};
 use smol::stream::StreamExt;
 use crate::messages::Packet;
 
@@ -63,6 +63,23 @@ impl PacketSorter {
                 None
             }
         }
+    }
+
+    pub fn get_all_sorted(&self) -> Vec<Packet> {
+        let mut packets = Vec::new();
+
+        while !self.sorted_packet_queue_rx.is_empty() {
+            match self.sorted_packet_queue_rx.recv_blocking() {
+                Ok(pkt) => {
+                    packets.push(pkt)
+                }
+                Err(e) => {
+                    error!("Failed to get all sorted packets: {}", e)
+                }
+            }
+        }
+
+        packets
     }
 
     pub async fn insert_packet(&mut self, pkt: Packet) {

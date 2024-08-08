@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::endpoint::{ConnectionEntry, Endpoint};
 use crate::{ConnectionInfo, endpoint, make_socket, messages};
 use crate::interface_logger::InterfaceLogger;
+use crate::packet_sorter_log::PacketSorterLogger;
 use crate::router::{Route, Router};
 
 
@@ -475,6 +476,38 @@ impl ConnectionManager {
             }
             Err(e) => {
                 error!("Got a duplication command, but failed to decode: {}", e)
+            }
+        }
+    }
+
+    pub async fn handle_sorted_packets(&mut self, endpoint_id: EndpointId, maybe_packet: Option<Packet>, maybe_logger: &mut Option<PacketSorterLogger>, tun: &Tun) {
+        // Handle the first packet
+        if let Some(packet) = maybe_packet {
+            if let Some(packet_sorter_logger) = maybe_logger {
+                packet_sorter_logger.add_log_line(
+                    packet.seq
+                ).await
+            }
+
+            tun.send(packet.bytes.as_slice()).await.unwrap();
+        }
+
+        // Check for more
+        if let Some(endpoint) = self.endpoints.get_mut(&endpoint_id) {
+            let packets = endpoint.packet_sorter.get_all_sorted();
+
+            if let Some(packet_sorter_logger) = maybe_logger {
+                for packet in packets {
+                    packet_sorter_logger.add_log_line(
+                        packet.seq
+                    ).await;
+
+                    tun.send(packet.bytes.as_slice()).await.unwrap();
+                }
+            } else {
+                for packet in packets {
+                    tun.send(packet.bytes.as_slice()).await.unwrap();
+                }
             }
         }
     }

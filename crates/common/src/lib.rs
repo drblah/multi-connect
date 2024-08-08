@@ -1,7 +1,5 @@
 #![feature(io_error_more)]
 
-extern crate core;
-
 use nix::libc;
 use std::io::Error;
 use anyhow::Result;

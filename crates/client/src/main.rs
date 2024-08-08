@@ -204,16 +204,13 @@ fn main() {
                         }
 
                     }
-                    Events::NewSortedPacket((_endpoint_id, maybe_packet)) => {
-                        if let Some(packet) = maybe_packet {
-                            if let Some(packet_sorter_logger) = &mut packet_sorter_logger {
-                                packet_sorter_logger.add_log_line(
-                                    packet.seq
-                                ).await
-                            }
-
-                            tun.send(packet.bytes.as_slice()).await.unwrap();
-                        }
+                    Events::NewSortedPacket((endpoint_id, maybe_packet)) => {
+                        connection_manager.handle_sorted_packets(
+                            endpoint_id,
+                            maybe_packet,
+                            &mut packet_sorter_logger,
+                            &tun
+                        ).await;
                     }
                     Events::DuplicationMessage((size, _addr)) => {
                         let duplication_message = &duplication_message_buffer[..size];

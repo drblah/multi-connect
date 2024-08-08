@@ -186,16 +186,13 @@ fn main() {
                             Err(e) => error!("Error while reading from tun device: {}", e.to_string())
                         }
                     }
-                    Events::NewSortedPacket((_endpoint_id, maybe_packet)) => {
-                        if let Some(packet) = maybe_packet {
-                            if let Some(packet_sorter_logger) = &mut packet_sorter_logger {
-                                packet_sorter_logger.add_log_line(
-                                    packet.seq
-                                ).await
-                            }
-
-                            tun_device.send(packet.bytes.as_slice()).await.unwrap();
-                        }
+                    Events::NewSortedPacket((endpoint_id, maybe_packet)) => {
+                        conman.handle_sorted_packets(
+                            endpoint_id,
+                            maybe_packet,
+                            &mut packet_sorter_logger,
+                            &tun_device
+                        ).await;
                     }
                     Events::FlushInterfaceLog(_) => {
                         if let Some(interface_logger) = &mut interface_logger {
