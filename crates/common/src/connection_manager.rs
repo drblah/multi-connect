@@ -3,7 +3,6 @@ use crate::messages::{DuplicationCommands, EndpointId, Messages, Packet};
 use futures::future::select_all;
 use smol::future::FutureExt;
 use std::collections::{HashMap};
-use std::io::Error;
 use std::net::{IpAddr, SocketAddr};
 use std::ops::AddAssign;
 use aes_gcm_siv::{Aes256GcmSiv, KeyInit};
@@ -18,7 +17,7 @@ use crate::interface_logger::InterfaceLogger;
 use crate::router::{Route, Router};
 
 
-#[derive(Debug)]
+
 pub struct ConnectionManager {
     endpoints: HashMap<EndpointId, Endpoint>,
     local_address: SocketAddr,

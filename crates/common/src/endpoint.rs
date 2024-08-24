@@ -15,7 +15,6 @@ use crate::packet_sorter::PacketSorter;
 use crate::path_latency::PathLatency;
 use crate::router::Route;
 
-#[derive(Debug)]
 pub struct ConnectionEntry {
     pub interface_name: String,
     pub interface_address: SocketAddr,

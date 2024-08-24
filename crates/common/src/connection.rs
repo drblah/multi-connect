@@ -1,3 +1,4 @@
+use std::io::Error;
 use std::mem;
 use std::net::{SocketAddr};
 use std::os::fd::{AsRawFd, FromRawFd};
@@ -19,7 +20,6 @@ pub enum ConnectionState {
 }
 
 /// Connection represents the current connection state between a certain network interface and an endpoint
-#[derive(Debug)]
 pub struct Connection {
     socket: UdpSocket,
     std_socket: Option<std::net::UdpSocket>,
@@ -33,7 +33,6 @@ pub struct Connection {
     buffer: Mutex<[u8; 65535]>,
     peer_addr: SocketAddr,
     cipher: Aes256GcmSiv,
-    peer_addr: SocketAddr,
     enabled: bool
 }
 
@@ -65,7 +64,6 @@ impl Connection {
             buffer: Mutex::new([0; 65535]),
             peer_addr: destination_socket_addr,
             cipher: Aes256GcmSiv::new_from_slice(encryption_key).unwrap(),
-            peer_addr: destination_socket_addr,
             enabled: true
         }
     }
