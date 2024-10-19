@@ -6,6 +6,8 @@ use smol::channel::TrySendError;
 use smol::stream::StreamExt;
 use crate::messages::Packet;
 
+const YEAR: Duration = Duration::from_secs(31536000);
+
 #[derive(Debug)]
 struct QueuedPacket {
     packet: Packet,
@@ -19,7 +21,8 @@ pub struct PacketSorter {
     pub next_seq: u64,
 
     deadline: Duration,
-    deadline_timer: Mutex<smol::Timer>,
+    deadline_timer: Mutex<tokio::time::Interval>,
+    deadline_active: bool,
     sorted_packet_queue_tx: smol::channel::Sender<Packet>,
     sorted_packet_queue_rx: smol::channel::Receiver<Packet>
 }
@@ -33,7 +36,8 @@ impl PacketSorter {
             packet_queue: BTreeMap::new(),
             next_seq: 0,
             deadline,
-            deadline_timer: Mutex::new(smol::Timer::after(deadline)),
+            deadline_timer: Mutex::new( tokio::time::interval_at( tokio::time::Instant::now() + deadline, deadline) ),
+            deadline_active: true,
             sorted_packet_queue_tx,
             sorted_packet_queue_rx
         }
@@ -46,7 +50,8 @@ impl PacketSorter {
                 let pkt = self.packet_queue.pop_first().unwrap().1;
 
                 let mut deadline_lock = self.deadline_timer.lock().await;
-                deadline_lock.set_after(self.deadline);
+                *deadline_lock = tokio::time::interval_at( tokio::time::Instant::now() + self.deadline, self.deadline);
+                self.deadline_active = true;
 
                 return Some(pkt.packet)
             }
@@ -102,8 +107,9 @@ impl PacketSorter {
 
             // Start deadline timer when we have new packets
             let mut deadline_timer_lock = self.deadline_timer.lock().await;
-            if !deadline_timer_lock.will_fire() {
-                deadline_timer_lock.set_after(self.deadline)
+            if !self.deadline_active {
+                *deadline_timer_lock = tokio::time::interval_at( tokio::time::Instant::now() + self.deadline, self.deadline);
+                self.deadline_active = true;
             }
         }
     }
@@ -134,7 +140,7 @@ impl PacketSorter {
 
             if self.packet_queue.is_empty() {
                 let mut deadline_timer_lock = self.deadline_timer.lock().await;
-                *deadline_timer_lock = smol::Timer::never();
+                *deadline_timer_lock = tokio::time::interval_at( tokio::time::Instant::now() + YEAR, self.deadline); // TODO - This is a hack to disable the timer
             } else {
                 // We have already checked if something is in the queue, so it is safe to unwrap here.
                 let next_timestamp = self.packet_queue
@@ -147,12 +153,13 @@ impl PacketSorter {
                 // Fire instantly because the next packet has already waited long enough
                 if time_waited_in_queue >= self.deadline {
                     let mut deadline_timer_lock = self.deadline_timer.lock().await;
-                    deadline_timer_lock.set_after(Duration::from_secs(0))
+                    *deadline_timer_lock = tokio::time::interval(self.deadline);
                 } else {
 
 
                     let mut deadline_timer_lock = self.deadline_timer.lock().await;
-                    deadline_timer_lock.set_after(self.deadline - time_waited_in_queue)
+                    //deadline_timer_lock.set_after(self.deadline - time_waited_in_queue)
+                    *deadline_timer_lock = tokio::time::interval_at( tokio::time::Instant::now() + self.deadline - time_waited_in_queue, self.deadline);
                 }
 
             }
@@ -160,7 +167,7 @@ impl PacketSorter {
         } else {
             // Disable deadline timer until we get the next packet
             let mut deadline_timer_lock = self.deadline_timer.lock().await;
-            *deadline_timer_lock = smol::Timer::never();
+            *deadline_timer_lock = tokio::time::interval_at( tokio::time::Instant::now() + YEAR, self.deadline); // TODO - This is a hack to disable the timer
         }
     }
 
@@ -180,7 +187,7 @@ impl PacketSorter {
     pub async fn await_deadline(&self) {
         let mut deadline_lock = self.deadline_timer.lock().await;
 
-        deadline_lock.next().await;
+        deadline_lock.tick().await;
     }
 
     pub fn set_deadline(&mut self, new_deadline: Duration) {
@@ -190,10 +197,11 @@ impl PacketSorter {
 
 #[cfg(test)]
 mod tests {
+    use async_compat::Compat;
     use super::*;
     #[test]
     fn sorter_handles_out_of_order_packets() {
-        smol::block_on(async {
+        smol::block_on(Compat::new(async {
             let mut sorter = PacketSorter::new(Duration::from_secs(1));
             let packet1 = Packet { seq: 0, id: 0, bytes: Vec::new() };
             let packet2 = Packet { seq: 1, id: 0, bytes: Vec::new() };
@@ -206,12 +214,12 @@ mod tests {
 
             assert_eq!(ordered1, packet1);
             assert_eq!(ordered2, packet2);
-        });
+        }));
     }
 
     #[test]
     fn sorter_clears_queue_on_large_sequence_jump() {
-        smol::block_on(async {
+        smol::block_on(Compat::new(async {
             let mut sorter = PacketSorter::new(Duration::from_secs(1));
             let packet1 = Packet { seq: 0, id: 0, bytes: Vec::new() };
             let packet11 = Packet { seq: 11, id: 0, bytes: Vec::new() };
@@ -235,6 +243,6 @@ mod tests {
             assert_eq!(eleventh_packet, packet11);
             //assert_eq!(sorter.get_next_packet().await, Some(packet11));
             //assert_eq!(sorter.get_queue_length(), 0);
-        });
+        }));
     }
 }
