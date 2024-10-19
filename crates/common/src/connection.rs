@@ -5,9 +5,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use smol::lock::Mutex;
 use tokio::net::UdpSocket;
-use smol::stream::StreamExt;
 use anyhow::Result;
 use log::{debug};
+use tokio::time::Instant;
 
 #[derive(Debug, PartialEq)]
 pub enum ConnectionState {
@@ -26,7 +26,7 @@ pub struct Connection {
     local_address: SocketAddr,
 
     connection_timeout_duration: Duration,
-    connection_timeout: Mutex<smol::Timer>,
+    connection_timeout: Mutex<tokio::time::Interval>,
     pub state: ConnectionState,
     buffer: Mutex<[u8; 65535]>,
     peer_addr: SocketAddr,
@@ -50,14 +50,16 @@ impl Connection {
         // if the underlying driver is actually ready to receive or not. **NOTE** we do some weird trickery
         // with manually implementing Drop to prevent from being closed twice when the smol socket is closed.
         let std_socket = unsafe { Some(std::net::UdpSocket::from_raw_fd(socket.clone().as_raw_fd()))};
-        
+
+        let connection_timeout_duration = Duration::from_millis(connection_timeout);
+
         Connection {
             socket,
             std_socket,
             interface_name,
             local_address,
-            connection_timeout_duration: Duration::from_millis(connection_timeout),
-            connection_timeout: Mutex::new(smol::Timer::after(Duration::from_millis(connection_timeout))),
+            connection_timeout_duration,
+            connection_timeout: Mutex::new( tokio::time::interval_at( Instant::now() + connection_timeout_duration, connection_timeout_duration ) ),
             state: ConnectionState::Startup,
             buffer: Mutex::new([0; 65535]),
             peer_addr: destination_socket_addr,
@@ -68,7 +70,7 @@ impl Connection {
 
     pub async fn reset_hello_timeout(&mut self) {
         let mut deadline_lock = self.connection_timeout.lock().await;
-        deadline_lock.set_after(self.connection_timeout_duration);
+        *deadline_lock = tokio::time::interval_at( Instant::now() + self.connection_timeout_duration, self.connection_timeout_duration )
     }
 
     pub async fn read(&self) -> Result<ReadInfo> {
@@ -114,7 +116,7 @@ impl Connection {
     pub async fn await_connection_timeout(&self) -> (SocketAddr, String) {
         let mut deadline_lock = self.connection_timeout.lock().await;
 
-        deadline_lock.next().await;
+        deadline_lock.tick().await;
 
         let interface_name = if self.interface_name.is_some() {
             self.interface_name.clone().unwrap()
