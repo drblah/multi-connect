@@ -487,6 +487,7 @@ impl ConnectionManager {
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
+    use async_compat::Compat;
     use uuid::Uuid;
     use crate::connection::ConnectionState;
     use crate::{connection, endpoint, messages};
@@ -495,7 +496,7 @@ mod tests {
 
     #[test]
     fn handle_hello_from_empty() {
-        smol::block_on(async {
+        smol::block_on(Compat::new(async {
             let conman_tun_address = "127.0.0.1".parse().unwrap();
             let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
 
@@ -515,11 +516,11 @@ mod tests {
             let endpoints = conman.endpoints.get(&154).unwrap();
 
             assert_eq!(endpoints.session_id, Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap());
-        });
+        }));
     }
     #[test]
     fn handle_hello_from_overwrite() {
-        smol::block_on(async {
+        smol::block_on(Compat::new(async {
             let uuids = vec![
                 Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
                 Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap()
@@ -545,12 +546,12 @@ mod tests {
             let endpoints = conman.endpoints.get(&154).unwrap();
 
             assert_eq!(endpoints.session_id, Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap());
-        });
+        }));
     }
 
     #[test]
     fn handle_hello_refuse_overwrite_session_reuse() {
-        smol::block_on(async {
+        smol::block_on(Compat::new(async {
             let uuids = vec![
                 Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
                 Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap(),
@@ -576,12 +577,12 @@ mod tests {
             let endpoints = conman.endpoints.get(&154).unwrap();
 
             assert_eq!(endpoints.session_id, Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap());
-        });
+        }));
     }
 
     #[test]
     fn connection_manager_client_single_connection() {
-        smol::block_on(async {
+        smol::block_on(Compat::new(async {
             let conman_tun_address = "127.0.0.1".parse().unwrap();
             let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
 
@@ -624,12 +625,12 @@ mod tests {
             let connection_status = &conman.endpoints.iter().next().unwrap().1.connections.first().unwrap().connection.state;
             assert_eq!(*connection_status, ConnectionState::Connected);
 
-        });
+        }));
     }
 
     #[test]
     fn connection_manager_client_multiple_connections() {
-        smol::block_on(async {
+        smol::block_on(Compat::new( async {
             let conman_tun_address = "127.0.0.1".parse().unwrap();
             let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
 
@@ -679,6 +680,6 @@ mod tests {
             for connection_entity in &conman.endpoints.iter().next().unwrap().1.connections {
                 assert_eq!(connection_entity.connection.state, ConnectionState::Connected)
             }
-        });
+        }));
     }
 }
