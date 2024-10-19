@@ -1,9 +1,10 @@
 use std::mem;
 use std::net::{SocketAddr};
 use std::os::fd::{AsRawFd, FromRawFd};
+use std::sync::Arc;
 use std::time::Duration;
 use smol::lock::Mutex;
-use smol::net::UdpSocket;
+use tokio::net::UdpSocket;
 use smol::stream::StreamExt;
 use anyhow::Result;
 use log::{debug};
@@ -18,7 +19,7 @@ pub enum ConnectionState {
 /// Connection represents the current connection state between a certain network interface and an endpoint
 #[derive(Debug)]
 pub struct Connection {
-    socket: UdpSocket,
+    socket: Arc<UdpSocket>,
     std_socket: Option<std::net::UdpSocket>,
     interface_name: Option<String>,
     #[allow(dead_code)]
@@ -41,6 +42,7 @@ pub struct ReadInfo {
 
 impl Connection {
     pub fn new(socket: UdpSocket, interface_name: Option<String>, connection_timeout: u64) -> Connection {
+        let socket = Arc::new(socket);
         let destination_socket_addr = socket.peer_addr().unwrap();
         let local_address = socket.local_addr().unwrap();
 

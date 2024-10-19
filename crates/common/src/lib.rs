@@ -6,7 +6,7 @@ use nix::libc;
 use std::io::Error;
 use anyhow::Result;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
-use smol::net::UdpSocket;
+use tokio::net::UdpSocket;
 use socket2::{Domain, Socket, Type};
 use std::net::UdpSocket as std_udp;
 use log::error;
@@ -88,7 +88,7 @@ fn make_socket(interface: &str, local_address: Option<Ipv4Addr>, local_port: Opt
     let std_udp: std_udp = socket.into();
     std_udp.set_nonblocking(true)?;
 
-    let udp_socket: UdpSocket = UdpSocket::from(Async::try_from(std_udp)?);
+    let udp_socket: UdpSocket = UdpSocket::from_std(std_udp)?;
 
     Ok(udp_socket)
 }

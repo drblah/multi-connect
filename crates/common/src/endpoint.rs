@@ -2,7 +2,7 @@ use std::net::{SocketAddr};
 use std::ops::AddAssign;
 use std::time::Duration;
 use smol::Async;
-use smol::net::UdpSocket;
+use tokio::net::UdpSocket;
 use socket2::SockAddr;
 use uuid::Uuid;
 use anyhow::Result;
@@ -78,7 +78,7 @@ impl Endpoint {
             let socket = std::net::UdpSocket::from(socket);
             socket.set_nonblocking(true)?;
 
-            let socket = UdpSocket::from(Async::try_from(socket)?);
+            let socket = UdpSocket::from_std(socket)?;
 
             socket.connect(source_address).await?;
 
