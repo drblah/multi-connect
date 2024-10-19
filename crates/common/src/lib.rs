@@ -10,7 +10,6 @@ use tokio::net::UdpSocket;
 use socket2::{Domain, Socket, Type};
 use std::net::UdpSocket as std_udp;
 use log::error;
-use smol::Async;
 use crate::messages::EndpointId;
 
 pub mod messages;

@@ -1,12 +1,11 @@
 use std::net::{SocketAddr};
 use std::ops::AddAssign;
 use std::time::Duration;
-use smol::Async;
 use tokio::net::UdpSocket;
 use socket2::SockAddr;
 use uuid::Uuid;
 use anyhow::Result;
-use smol::future::FutureExt;
+use futures::future::FutureExt;
 use futures::future::select_all;
 use log::{error, info};
 use crate::connection::{Connection, ConnectionState};
