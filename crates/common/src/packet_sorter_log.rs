@@ -1,14 +1,14 @@
-use smol::io::AsyncWriteExt;
+use tokio::io::AsyncWriteExt;
 
 pub struct PacketSorterLogger {
-    log_file_writer: smol::io::BufWriter<smol::fs::File>
+    log_file_writer: tokio::io::BufWriter<tokio::fs::File>
 }
 
 impl PacketSorterLogger {
     pub async fn new(log_path: String) -> Self {
 
-        let file = smol::fs::File::create(log_path).await.unwrap();
-        let mut log_file_writer = smol::io::BufWriter::new(file);
+        let file = tokio::fs::File::create(log_path).await.unwrap();
+        let mut log_file_writer = tokio::io::BufWriter::new(file);
 
         // Add header:
         log_file_writer.write_all(
