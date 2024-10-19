@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use tokio::sync::Mutex;
 use std::time::{Duration, Instant};
 use log::{debug, error};
-use smol::channel::TrySendError;
+use tokio::sync::mpsc::error::TrySendError;
 use crate::messages::Packet;
 
 const YEAR: Duration = Duration::from_secs(31536000);
@@ -22,14 +22,16 @@ pub struct PacketSorter {
     deadline: Duration,
     deadline_timer: Mutex<tokio::time::Interval>,
     deadline_active: bool,
-    sorted_packet_queue_tx: smol::channel::Sender<Packet>,
-    sorted_packet_queue_rx: smol::channel::Receiver<Packet>
+    sorted_packet_queue_tx: tokio::sync::mpsc::Sender<Packet>,
+    sorted_packet_queue_rx: Mutex<tokio::sync::mpsc::Receiver<Packet>>
 }
 
 impl PacketSorter {
     pub fn new(deadline: Duration) -> Self {
+        
+        let (sorted_packet_queue_tx, sorted_packet_queue_rx) = tokio::sync::mpsc::channel(1000);
 
-        let (sorted_packet_queue_tx, sorted_packet_queue_rx) = smol::channel::bounded(1000);
+        let sorted_packet_queue_rx = Mutex::new(sorted_packet_queue_rx);
 
         PacketSorter {
             packet_queue: BTreeMap::new(),
@@ -60,13 +62,9 @@ impl PacketSorter {
     }
 
     pub async fn await_have_next_packet(&self) -> Option<Packet> {
-        match self.sorted_packet_queue_rx.recv().await {
-            Ok(packet) => Some(packet),
-            Err(_e) => {
-                error!("Packet sorter packet queue closed!, {}", _e);
-                None
-            }
-        }
+        let mut sorted_packet_queue_rx_lock = self.sorted_packet_queue_rx.lock().await;
+
+        sorted_packet_queue_rx_lock.recv().await
     }
 
     pub async fn insert_packet(&mut self, pkt: Packet) {
@@ -114,6 +112,23 @@ impl PacketSorter {
     }
 
     async fn enqueue_sorted_packets(&mut self) {
+        /*
+        while let Some(packet) = self.get_next_packet().await {
+            match self.sorted_packet_queue_tx.try_send(packet) {
+                Ok(_) => {}
+                Err(e) => {
+                    match e {
+                        TrySendError::Full(_) => {
+                            error!("Packet sorter queue is full! Dropping packets!")
+                        }
+                        TrySendError::Closed(_) => {
+                            error!("Packet sorter queue is closed!")
+                        }
+                    }
+                }
+            }
+        }*/
+
         while let Some(packet) = self.get_next_packet().await {
             match self.sorted_packet_queue_tx.try_send(packet) {
                 Ok(_) => {}
@@ -211,8 +226,10 @@ mod tests {
             sorter.insert_packet(packet2.clone()).await;
             sorter.insert_packet(packet1.clone()).await;
 
-            let ordered1 = sorter.sorted_packet_queue_rx.recv().await.unwrap();
-            let ordered2 = sorter.sorted_packet_queue_rx.recv().await.unwrap();
+            let mut soter_rx_lock = sorter.sorted_packet_queue_rx.lock().await;
+
+            let ordered1 = soter_rx_lock.recv().await.unwrap();
+            let ordered2 = soter_rx_lock.recv().await.unwrap();
 
             assert_eq!(ordered1, packet1);
             assert_eq!(ordered2, packet2);
@@ -229,8 +246,11 @@ mod tests {
             sorter.insert_packet(packet1.clone()).await;
             sorter.insert_packet(packet11.clone()).await;
 
-            let first_packet = sorter.sorted_packet_queue_rx.recv().await.unwrap();
-            assert_eq!(first_packet, packet1);
+            {
+                let mut sorter_rx_lock = sorter.sorted_packet_queue_rx.lock().await;
+                let first_packet = sorter_rx_lock.recv().await.unwrap();
+                assert_eq!(first_packet, packet1);
+            }
 
             // seq 11 should be in the btreehashmap but not yet considered "sorted". Therefore, we should not have next packet
             let should_be_false = sorter.have_next_packet();
@@ -240,8 +260,10 @@ mod tests {
             sorter.await_deadline().await;
             sorter.advance_queue().await;
 
+
             // We should now have seq11
-            let eleventh_packet = sorter.sorted_packet_queue_rx.recv().await.unwrap();
+            let mut sorter_rx_lock = sorter.sorted_packet_queue_rx.lock().await;
+            let eleventh_packet = sorter_rx_lock.recv().await.unwrap();
             assert_eq!(eleventh_packet, packet11);
             //assert_eq!(sorter.get_next_packet().await, Some(packet11));
             //assert_eq!(sorter.get_queue_length(), 0);
