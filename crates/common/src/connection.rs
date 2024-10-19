@@ -3,7 +3,7 @@ use std::net::{SocketAddr};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::sync::Arc;
 use std::time::Duration;
-use smol::lock::Mutex;
+use tokio::sync::Mutex;
 use tokio::net::UdpSocket;
 use anyhow::Result;
 use log::{debug};
