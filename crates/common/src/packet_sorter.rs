@@ -1,9 +1,8 @@
 use std::collections::BTreeMap;
-use smol::lock::Mutex;
+use tokio::sync::Mutex;
 use std::time::{Duration, Instant};
 use log::{debug, error};
 use smol::channel::TrySendError;
-use smol::stream::StreamExt;
 use crate::messages::Packet;
 
 const YEAR: Duration = Duration::from_secs(31536000);
@@ -141,6 +140,7 @@ impl PacketSorter {
             if self.packet_queue.is_empty() {
                 let mut deadline_timer_lock = self.deadline_timer.lock().await;
                 *deadline_timer_lock = tokio::time::interval_at( tokio::time::Instant::now() + YEAR, self.deadline); // TODO - This is a hack to disable the timer
+                self.deadline_active = false;
             } else {
                 // We have already checked if something is in the queue, so it is safe to unwrap here.
                 let next_timestamp = self.packet_queue
@@ -154,12 +154,14 @@ impl PacketSorter {
                 if time_waited_in_queue >= self.deadline {
                     let mut deadline_timer_lock = self.deadline_timer.lock().await;
                     *deadline_timer_lock = tokio::time::interval(self.deadline);
+                    self.deadline_active = true;
                 } else {
 
 
                     let mut deadline_timer_lock = self.deadline_timer.lock().await;
                     //deadline_timer_lock.set_after(self.deadline - time_waited_in_queue)
                     *deadline_timer_lock = tokio::time::interval_at( tokio::time::Instant::now() + self.deadline - time_waited_in_queue, self.deadline);
+                    self.deadline_active = true;
                 }
 
             }
