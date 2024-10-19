@@ -28,7 +28,7 @@ pub struct PacketSorter {
 
 impl PacketSorter {
     pub fn new(deadline: Duration) -> Self {
-        
+
         let (sorted_packet_queue_tx, sorted_packet_queue_rx) = tokio::sync::mpsc::channel(1000);
 
         let sorted_packet_queue_rx = Mutex::new(sorted_packet_queue_rx);
@@ -214,59 +214,54 @@ impl PacketSorter {
 
 #[cfg(test)]
 mod tests {
-    use async_compat::Compat;
     use super::*;
-    #[test]
-    fn sorter_handles_out_of_order_packets() {
-        smol::block_on(Compat::new(async {
-            let mut sorter = PacketSorter::new(Duration::from_secs(1));
-            let packet1 = Packet { seq: 0, id: 0, bytes: Vec::new() };
-            let packet2 = Packet { seq: 1, id: 0, bytes: Vec::new() };
+    #[tokio::test]
+    async fn sorter_handles_out_of_order_packets() {
+        let mut sorter = PacketSorter::new(Duration::from_secs(1));
+        let packet1 = Packet { seq: 0, id: 0, bytes: Vec::new() };
+        let packet2 = Packet { seq: 1, id: 0, bytes: Vec::new() };
 
-            sorter.insert_packet(packet2.clone()).await;
-            sorter.insert_packet(packet1.clone()).await;
+        sorter.insert_packet(packet2.clone()).await;
+        sorter.insert_packet(packet1.clone()).await;
 
-            let mut soter_rx_lock = sorter.sorted_packet_queue_rx.lock().await;
+        let mut soter_rx_lock = sorter.sorted_packet_queue_rx.lock().await;
 
-            let ordered1 = soter_rx_lock.recv().await.unwrap();
-            let ordered2 = soter_rx_lock.recv().await.unwrap();
+        let ordered1 = soter_rx_lock.recv().await.unwrap();
+        let ordered2 = soter_rx_lock.recv().await.unwrap();
 
-            assert_eq!(ordered1, packet1);
-            assert_eq!(ordered2, packet2);
-        }));
+        assert_eq!(ordered1, packet1);
+        assert_eq!(ordered2, packet2);
     }
 
-    #[test]
-    fn sorter_clears_queue_on_large_sequence_jump() {
-        smol::block_on(Compat::new(async {
-            let mut sorter = PacketSorter::new(Duration::from_secs(1));
-            let packet1 = Packet { seq: 0, id: 0, bytes: Vec::new() };
-            let packet11 = Packet { seq: 11, id: 0, bytes: Vec::new() };
+    #[tokio::test]
+    async fn sorter_clears_queue_on_large_sequence_jump() {
+        let mut sorter = PacketSorter::new(Duration::from_secs(1));
+        let packet1 = Packet { seq: 0, id: 0, bytes: Vec::new() };
+        let packet11 = Packet { seq: 11, id: 0, bytes: Vec::new() };
 
-            sorter.insert_packet(packet1.clone()).await;
-            sorter.insert_packet(packet11.clone()).await;
+        sorter.insert_packet(packet1.clone()).await;
+        sorter.insert_packet(packet11.clone()).await;
 
-            {
-                let mut sorter_rx_lock = sorter.sorted_packet_queue_rx.lock().await;
-                let first_packet = sorter_rx_lock.recv().await.unwrap();
-                assert_eq!(first_packet, packet1);
-            }
-
-            // seq 11 should be in the btreehashmap but not yet considered "sorted". Therefore, we should not have next packet
-            let should_be_false = sorter.have_next_packet();
-            assert_eq!(should_be_false, false);
-
-            // Wait for our deadline and advance queue
-            sorter.await_deadline().await;
-            sorter.advance_queue().await;
-
-
-            // We should now have seq11
+        {
             let mut sorter_rx_lock = sorter.sorted_packet_queue_rx.lock().await;
-            let eleventh_packet = sorter_rx_lock.recv().await.unwrap();
-            assert_eq!(eleventh_packet, packet11);
-            //assert_eq!(sorter.get_next_packet().await, Some(packet11));
-            //assert_eq!(sorter.get_queue_length(), 0);
-        }));
+            let first_packet = sorter_rx_lock.recv().await.unwrap();
+            assert_eq!(first_packet, packet1);
+        }
+
+        // seq 11 should be in the btreehashmap but not yet considered "sorted". Therefore, we should not have next packet
+        let should_be_false = sorter.have_next_packet();
+        assert_eq!(should_be_false, false);
+
+        // Wait for our deadline and advance queue
+        sorter.await_deadline().await;
+        sorter.advance_queue().await;
+
+
+        // We should now have seq11
+        let mut sorter_rx_lock = sorter.sorted_packet_queue_rx.lock().await;
+        let eleventh_packet = sorter_rx_lock.recv().await.unwrap();
+        assert_eq!(eleventh_packet, packet11);
+        //assert_eq!(sorter.get_next_packet().await, Some(packet11));
+        //assert_eq!(sorter.get_queue_length(), 0);
     }
 }

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crate::messages::{DuplicationCommands, EndpointId, Messages, Packet};
 use futures::future::select_all;
-use smol::future::FutureExt;
+use futures::future::FutureExt;
 use std::collections::{HashMap};
 use std::net::{IpAddr, SocketAddr};
 use std::ops::AddAssign;
@@ -487,199 +487,187 @@ impl ConnectionManager {
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
-    use async_compat::Compat;
     use uuid::Uuid;
     use crate::connection::ConnectionState;
     use crate::{connection, endpoint, messages};
     use crate::connection_manager::ConnectionManager;
     use crate::messages::{HelloAck, Messages};
 
-    #[test]
-    fn handle_hello_from_empty() {
-        smol::block_on(Compat::new(async {
-            let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
+    #[tokio::test]
+    async fn handle_hello_from_empty() {
+        let conman_tun_address = "127.0.0.1".parse().unwrap();
+        let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
 
 
+        //let hello_tun_address = "127.0.0.2".parse().unwrap();
+        let hello = messages::Hello { id: 154, session_id: Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(), static_routes: conman.own_static_routes.clone(), hello_seq: 0 };
+
+        let hello_message = messages::Messages::Hello(hello);
+        let serialized = bincode::serialize(&hello_message).unwrap();
+        let server_interface_name = "DYN-interface".to_string();
+
+        conman.handle_hello(serialized, "127.0.0.2:123".parse().unwrap(), server_interface_name.clone()).await;
+
+        assert!(conman.has_endpoints());
+        assert_eq!(conman.endpoints.len(), 1);
+
+        let endpoints = conman.endpoints.get(&154).unwrap();
+
+        assert_eq!(endpoints.session_id, Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap());
+    }
+    #[tokio::test]
+    async fn handle_hello_from_overwrite() {
+        let uuids = vec![
+            Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
+            Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap()
+        ];
+        let conman_tun_address = "127.0.0.1".parse().unwrap();
+        let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
+
+        let server_interface_name = "DYN-interface".to_string();
+
+        for uuid in uuids {
             //let hello_tun_address = "127.0.0.2".parse().unwrap();
-            let hello = messages::Hello { id: 154, session_id: Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(), static_routes: conman.own_static_routes.clone(), hello_seq: 0 };
+            let hello = messages::Hello { id: 154, session_id: uuid, static_routes: conman.own_static_routes.clone(), hello_seq: 0 };
 
             let hello_message = messages::Messages::Hello(hello);
             let serialized = bincode::serialize(&hello_message).unwrap();
-            let server_interface_name = "DYN-interface".to_string();
 
             conman.handle_hello(serialized, "127.0.0.2:123".parse().unwrap(), server_interface_name.clone()).await;
+        }
 
-            assert!(conman.has_endpoints());
-            assert_eq!(conman.endpoints.len(), 1);
+        assert!(conman.has_endpoints());
+        assert_eq!(conman.endpoints.len(), 1);
 
-            let endpoints = conman.endpoints.get(&154).unwrap();
+        let endpoints = conman.endpoints.get(&154).unwrap();
 
-            assert_eq!(endpoints.session_id, Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap());
-        }));
-    }
-    #[test]
-    fn handle_hello_from_overwrite() {
-        smol::block_on(Compat::new(async {
-            let uuids = vec![
-                Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
-                Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap()
-            ];
-            let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
-
-            let server_interface_name = "DYN-interface".to_string();
-
-            for uuid in uuids {
-                //let hello_tun_address = "127.0.0.2".parse().unwrap();
-                let hello = messages::Hello { id: 154, session_id: uuid, static_routes: conman.own_static_routes.clone(), hello_seq: 0 };
-
-                let hello_message = messages::Messages::Hello(hello);
-                let serialized = bincode::serialize(&hello_message).unwrap();
-
-                conman.handle_hello(serialized, "127.0.0.2:123".parse().unwrap(), server_interface_name.clone()).await;
-            }
-
-            assert!(conman.has_endpoints());
-            assert_eq!(conman.endpoints.len(), 1);
-
-            let endpoints = conman.endpoints.get(&154).unwrap();
-
-            assert_eq!(endpoints.session_id, Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap());
-        }));
+        assert_eq!(endpoints.session_id, Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap());
     }
 
-    #[test]
-    fn handle_hello_refuse_overwrite_session_reuse() {
-        smol::block_on(Compat::new(async {
-            let uuids = vec![
-                Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
-                Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap(),
-                Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
-            ];
-            let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
-            let server_interface_name = "DYN-interface".to_string();
+    #[tokio::test]
+    async fn handle_hello_refuse_overwrite_session_reuse() {
+        let uuids = vec![
+            Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
+            Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap(),
+            Uuid::parse_str("47ce9f06-a692-4463-8075-d0033d1b7229").unwrap(),
+        ];
+        let conman_tun_address = "127.0.0.1".parse().unwrap();
+        let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
+        let server_interface_name = "DYN-interface".to_string();
 
-            for uuid in uuids {
-                //let hello_tun_address = "127.0.0.2".parse().unwrap();
-                let hello = messages::Hello { id: 154, session_id: uuid, static_routes: conman.own_static_routes.clone(), hello_seq: 0 };
+        for uuid in uuids {
+            //let hello_tun_address = "127.0.0.2".parse().unwrap();
+            let hello = messages::Hello { id: 154, session_id: uuid, static_routes: conman.own_static_routes.clone(), hello_seq: 0 };
 
-                let hello_message = messages::Messages::Hello(hello);
-                let serialized = bincode::serialize(&hello_message).unwrap();
+            let hello_message = messages::Messages::Hello(hello);
+            let serialized = bincode::serialize(&hello_message).unwrap();
 
-                conman.handle_hello(serialized, "127.0.0.2:123".parse().unwrap(), server_interface_name.clone()).await;
-            }
+            conman.handle_hello(serialized, "127.0.0.2:123".parse().unwrap(), server_interface_name.clone()).await;
+        }
 
-            assert!(conman.has_endpoints());
-            assert_eq!(conman.endpoints.len(), 1);
+        assert!(conman.has_endpoints());
+        assert_eq!(conman.endpoints.len(), 1);
 
-            let endpoints = conman.endpoints.get(&154).unwrap();
+        let endpoints = conman.endpoints.get(&154).unwrap();
 
-            assert_eq!(endpoints.session_id, Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap());
-        }));
+        assert_eq!(endpoints.session_id, Uuid::parse_str("deadbeef-a692-4463-8075-d0033d1b7229").unwrap());
     }
 
-    #[test]
-    fn connection_manager_client_single_connection() {
-        smol::block_on(Compat::new(async {
-            let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
+    #[tokio::test]
+    async fn connection_manager_client_single_connection() {
+        let conman_tun_address = "127.0.0.1".parse().unwrap();
+        let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
 
-            let own_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
-            let server_id = 1337;
-            let server_address = "127.0.0.2:1337".parse().unwrap();
+        let own_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let server_id = 1337;
+        let server_address = "127.0.0.2:1337".parse().unwrap();
 
-            conman.create_new_connection(
-                "lo".to_string(),
-                own_address.clone(),
-                server_address,
-                server_id
-            ).await.unwrap();
+        conman.create_new_connection(
+            "lo".to_string(),
+            own_address.clone(),
+            server_address,
+            server_id
+        ).await.unwrap();
 
-            let session_id = conman.endpoints.iter().next().unwrap().1.session_id;
-            //let server_tun_address = "127.0.100.1".parse().unwrap();
+        let session_id = conman.endpoints.iter().next().unwrap().1.session_id;
+        //let server_tun_address = "127.0.100.1".parse().unwrap();
 
-            // Make fake HelloAck messages from the server
-            let ack = HelloAck { id: server_id, session_id, static_routes: conman.own_static_routes.clone(), hello_ack_seq: 0 };
-            let ack_message = Messages::HelloAck(ack);
+        // Make fake HelloAck messages from the server
+        let ack = HelloAck { id: server_id, session_id, static_routes: conman.own_static_routes.clone(), hello_ack_seq: 0 };
+        let ack_message = Messages::HelloAck(ack);
 
-            let serialized = bincode::serialize(&ack_message).unwrap();
+        let serialized = bincode::serialize(&ack_message).unwrap();
 
-            let read_info = endpoint::ReadInfo {
-                connection_read_info: connection::ReadInfo {
-                    packet_bytes: serialized,
-                    source_address: server_address,
-                    interface_name: "lo".to_string(),
-                },
-                endpoint_id: server_id,
-            };
+        let read_info = endpoint::ReadInfo {
+            connection_read_info: connection::ReadInfo {
+                packet_bytes: serialized,
+                source_address: server_address,
+                interface_name: "lo".to_string(),
+            },
+            endpoint_id: server_id,
+        };
 
 
-            conman.handle_established_message(
-                read_info,
-                &mut None
-            ).await;
+        conman.handle_established_message(
+            read_info,
+            &mut None
+        ).await;
 
-            // The connection should now be in connected state
-            let connection_status = &conman.endpoints.iter().next().unwrap().1.connections.first().unwrap().connection.state;
-            assert_eq!(*connection_status, ConnectionState::Connected);
-
-        }));
+        // The connection should now be in connected state
+        let connection_status = &conman.endpoints.iter().next().unwrap().1.connections.first().unwrap().connection.state;
+        assert_eq!(*connection_status, ConnectionState::Connected);
     }
 
-    #[test]
-    fn connection_manager_client_multiple_connections() {
-        smol::block_on(Compat::new( async {
-            let conman_tun_address = "127.0.0.1".parse().unwrap();
-            let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
+    #[tokio::test]
+    async fn connection_manager_client_multiple_connections() {
+        let conman_tun_address = "127.0.0.1".parse().unwrap();
+        let mut conman = ConnectionManager::new("127.0.0.1:0".parse().unwrap(), 1, conman_tun_address, None, 10000, 100);
 
-            let own_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
-            let server_id = 1337;
-            let server_address = "127.0.0.2:1337".parse().unwrap();
+        let own_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let server_id = 1337;
+        let server_address = "127.0.0.2:1337".parse().unwrap();
 
-            conman.create_new_connection(
-                "lo".to_string(),
-                own_address.clone(),
-                server_address,
-                server_id
-            ).await.unwrap();
+        conman.create_new_connection(
+            "lo".to_string(),
+            own_address.clone(),
+            server_address,
+            server_id
+        ).await.unwrap();
 
-            conman.create_new_connection(
-                "lo".to_string(),
-                "127.0.0.5:0".parse().unwrap(),
-                server_address,
-                server_id
-            ).await.unwrap();
+        conman.create_new_connection(
+            "lo".to_string(),
+            "127.0.0.5:0".parse().unwrap(),
+            server_address,
+            server_id
+        ).await.unwrap();
 
-            let session_id = conman.endpoints.iter().next().unwrap().1.session_id;
-            //let server_tun_address = "127.0.100.1".parse().unwrap();
+        let session_id = conman.endpoints.iter().next().unwrap().1.session_id;
+        //let server_tun_address = "127.0.100.1".parse().unwrap();
 
-            // Make fake HelloAck messages from the server
-            let ack = HelloAck { id: server_id, session_id, static_routes: conman.own_static_routes.clone(), hello_ack_seq: 0 };
-            let ack_message = Messages::HelloAck(ack);
+        // Make fake HelloAck messages from the server
+        let ack = HelloAck { id: server_id, session_id, static_routes: conman.own_static_routes.clone(), hello_ack_seq: 0 };
+        let ack_message = Messages::HelloAck(ack);
 
-            let serialized = bincode::serialize(&ack_message).unwrap();
+        let serialized = bincode::serialize(&ack_message).unwrap();
 
-            let read_info = endpoint::ReadInfo {
-                connection_read_info: connection::ReadInfo {
-                    packet_bytes: serialized,
-                    source_address: server_address,
-                    interface_name: "lo".to_string(),
-                },
-                endpoint_id: server_id,
-            };
+        let read_info = endpoint::ReadInfo {
+            connection_read_info: connection::ReadInfo {
+                packet_bytes: serialized,
+                source_address: server_address,
+                interface_name: "lo".to_string(),
+            },
+            endpoint_id: server_id,
+        };
 
 
-            conman.handle_established_message(
-                read_info,
-                &mut None
-            ).await;
+        conman.handle_established_message(
+            read_info,
+            &mut None
+        ).await;
 
-            // The connections should now be in connected state
-            for connection_entity in &conman.endpoints.iter().next().unwrap().1.connections {
-                assert_eq!(connection_entity.connection.state, ConnectionState::Connected)
-            }
-        }));
+        // The connections should now be in connected state
+        for connection_entity in &conman.endpoints.iter().next().unwrap().1.connections {
+            assert_eq!(connection_entity.connection.state, ConnectionState::Connected)
+        }
     }
 }

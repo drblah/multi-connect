@@ -46,6 +46,7 @@ impl Connection {
         let destination_socket_addr = socket.peer_addr().unwrap();
         let local_address = socket.local_addr().unwrap();
 
+        // TODO: This hack should not be needed after switching to Tokio
         // This is a raw copy of the smol socket so we can call non blocking send and get instant info
         // if the underlying driver is actually ready to receive or not. **NOTE** we do some weird trickery
         // with manually implementing Drop to prevent from being closed twice when the smol socket is closed.
