@@ -83,7 +83,6 @@ fn main() {
         // TODO: Can we handle this in a more generic way?
         let client_socket_address = settings.interfaces.first().unwrap().bind_address; //"172.16.200.2:0".parse().unwrap();
 
-        let server_socket_address = settings.server_address; //"172.16.200.4:40000".parse().unwrap();
         let server_endpoint_id = settings.server_id;
 
         let client_id = settings.peer_id;
@@ -118,14 +117,14 @@ fn main() {
             connection_info.push(ConnectionInfo {
                 interface_name: interface_config.interface_name.clone(),
                 local_address: interface_config.bind_address,
-                destination_address: server_socket_address,
+                destination_address: interface_config.server_address,
                 destination_endpoint_id: server_endpoint_id
             });
 
             connection_manager.create_new_connection(
                 interface_config.interface_name.clone(),
                 interface_config.bind_address,
-                server_socket_address,
+                interface_config.server_address,
                 server_endpoint_id
             ).await.unwrap()
         }
@@ -230,7 +229,7 @@ fn main() {
                     match connection_manager.create_new_connection(
                         interface_config.interface_name.clone(),
                         interface_config.bind_address,
-                        server_socket_address,
+                        interface_config.server_address,
                         server_endpoint_id
                     ).await {
                         Ok(()) => { debug!("Restarted connection on: {}", interface_config.interface_name) }
