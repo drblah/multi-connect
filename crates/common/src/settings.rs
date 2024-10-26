@@ -23,6 +23,7 @@ pub struct ServerSettings {
 pub struct Interface {
     pub interface_name: String,
     pub bind_address: SocketAddr,
+    pub server_address: SocketAddr,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -46,7 +47,6 @@ pub struct ClientSettings {
     pub peer_id: u16,
     pub interfaces: Vec<Interface>,
     pub server_id: u16,
-    pub server_address: SocketAddr,
     pub tunnel_config: TunnelSettings,
     pub static_routes: Vec<RouteConfig>,
     pub connection_timeout: u64,
