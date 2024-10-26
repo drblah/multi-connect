@@ -250,40 +250,7 @@ impl ConnectionManager {
                 // get endpoint
                 let endpoint = self.endpoints.get_mut(&endpoint_id).unwrap();
 
-                // Encapsulate packet in messages::Packet
-                let packet = Packet {
-                    seq: endpoint.tx_counter,
-                    id: endpoint.id,
-                    bytes: packet.to_vec(),
-                };
-
-                let serialized_pakcet = bincode::serialize(&Messages::Packet(packet)).unwrap();
-
-                endpoint.tx_counter.add_assign(1);
-
-
-                // Send to endpoint
-                for connection_entry in &mut endpoint.connections {
-                    if connection_entry.connection.is_enabled() {
-                        match connection_entry.connection.write(serialized_pakcet.clone()).await {
-                            Ok(_len) => {
-                                continue
-                            }
-                            Err(e) => {
-                                match e.kind() {
-                                    std::io::ErrorKind::ConnectionRefused => {
-                                        error!("Connection refused. Removing connection: {}, {}", connection_entry.interface_name, connection_entry.interface_address);
-                                        connection_entry.connection.state = crate::connection::ConnectionState::Disconnected;
-                                    }
-                                    _ => {
-                                        error!("Error while writing to socket: {}", e.to_string());
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                }
+                endpoint.send(packet).await;
             }
         } else {
             warn!("No route found for packet. Dropping packet");

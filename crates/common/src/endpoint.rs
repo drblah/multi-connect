@@ -120,6 +120,42 @@ impl Endpoint {
         }
     }
 
+    pub async fn send(&mut self, packet: &[u8]) {
+        // Encapsulate packet in messages::Packet
+        let packet = Packet {
+            seq: self.tx_counter,
+            id: self.id,
+            bytes: packet.to_vec(),
+        };
+
+        let serialized_packet = bincode::serialize(&Messages::Packet(packet)).unwrap();
+
+        self.tx_counter.add_assign(1);
+
+
+        // Send to endpoint
+        for connection_entry in &mut self.connections {
+            if connection_entry.connection.is_enabled() {
+                match connection_entry.connection.write(serialized_packet.clone()).await {
+                    Ok(_len) => {
+                        continue
+                    }
+                    Err(e) => {
+                        match e.kind() {
+                            std::io::ErrorKind::ConnectionRefused => {
+                                error!("Connection refused. Removing connection: {}, {}", connection_entry.interface_name, connection_entry.interface_address);
+                                connection_entry.connection.state = crate::connection::ConnectionState::Disconnected;
+                            }
+                            _ => {
+                                error!("Error while writing to socket: {}", e.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn await_connections(&self) -> Result<ReadInfo> {
         let mut futures = Vec::new();
 
