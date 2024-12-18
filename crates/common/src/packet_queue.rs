@@ -3,12 +3,14 @@ use std::collections::btree_map::OccupiedEntry;
 use tokio::time::Instant;
 use crate::messages::Packet;
 
+#[derive(Debug)]
 struct OrderInfo {
     seq: u64,
     timestamp: Instant
 }
 
-struct PacketQueue {
+#[derive(Debug)]
+pub struct PacketQueue {
     seq_ordered: BTreeMap<u64, Packet>,
     insert_order: VecDeque<OrderInfo>
 }
@@ -47,16 +49,6 @@ impl PacketQueue {
         entry
     }
     
-    pub fn delete(&mut self, seq: u64) -> Option<Packet> {
-        if let Some(packet) = self.seq_ordered.remove(&seq) {
-            self.insert_order.retain(|x| x.seq != seq);
-            
-            Some(packet)
-        } else {
-            None
-        }
-    }
-    
     pub fn pop_first(&mut self) -> Option<Packet> {
         if let Some(packet) = self.seq_ordered.pop_first() {
             self.insert_order.retain(|x| x.seq != packet.0);
@@ -65,6 +57,14 @@ impl PacketQueue {
         } else {
             None
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.seq_ordered.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.seq_ordered.len()
     }
 }
 

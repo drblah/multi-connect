@@ -1,22 +1,16 @@
-use std::collections::BTreeMap;
 use tokio::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use log::{debug, error};
 use tokio::sync::mpsc::error::TrySendError;
 use crate::messages::Packet;
+use crate::packet_queue::PacketQueue;
 
 const YEAR: Duration = Duration::from_secs(31536000);
-
-#[derive(Debug)]
-struct QueuedPacket {
-    packet: Packet,
-    timestamp: Instant
-}
 
 
 #[derive(Debug)]
 pub struct PacketSorter {
-    packet_queue: BTreeMap<u64, QueuedPacket>,
+    packet_queue: PacketQueue,
     pub next_seq: u64,
 
     deadline: Duration,
@@ -34,7 +28,7 @@ impl PacketSorter {
         let sorted_packet_queue_rx = Mutex::new(sorted_packet_queue_rx);
 
         PacketSorter {
-            packet_queue: BTreeMap::new(),
+            packet_queue: PacketQueue::new(),
             next_seq: 0,
             deadline,
             deadline_timer: Mutex::new( tokio::time::interval_at( tokio::time::Instant::now() + deadline, deadline) ),
@@ -48,13 +42,13 @@ impl PacketSorter {
         if let Some(entry) = self.packet_queue.first_entry() {
             if *entry.key() == self.next_seq {
                 self.next_seq += 1;
-                let pkt = self.packet_queue.pop_first().unwrap().1;
+                let pkt = self.packet_queue.pop_first().unwrap();
 
                 let mut deadline_lock = self.deadline_timer.lock().await;
                 *deadline_lock = tokio::time::interval_at( tokio::time::Instant::now() + self.deadline, self.deadline);
                 self.deadline_active = true;
 
-                return Some(pkt.packet)
+                return Some(pkt)
             }
         }
 
@@ -70,32 +64,24 @@ impl PacketSorter {
     pub async fn insert_packet(&mut self, pkt: Packet) {
         let sequence_number = pkt.seq;
         if sequence_number >= self.next_seq {
-            let queued_packet = QueuedPacket {
-                packet: pkt,
-                timestamp: Instant::now()
-            };
             match self.packet_queue.last_entry() {
                 Some(tail) => {
                     match sequence_number.checked_sub(*tail.key()) {
                         Some(diff) if diff > 100 => {
                             debug!("Large sequence jump detected. Clear packet queue and insert packet: from {} to {} - {}", *tail.key(), sequence_number, sequence_number - *tail.key());
-                            self.packet_queue.entry(sequence_number)
-                                .or_insert(queued_packet);
+                            self.packet_queue.insert(pkt);
                             self.advance_queue().await;
                         },
                         Some(_) => {
-                            self.packet_queue.entry(sequence_number)
-                                .or_insert(queued_packet);
+                            self.packet_queue.insert(pkt);
                         },
                         None => {
-                            self.packet_queue.entry(sequence_number)
-                                .or_insert(queued_packet);
+                            self.packet_queue.insert(pkt);
                         },
                     }
                 },
                 None => {
-                    self.packet_queue.entry(sequence_number)
-                        .or_insert(queued_packet);
+                    self.packet_queue.insert(pkt);
                 },
             }
 
@@ -112,23 +98,6 @@ impl PacketSorter {
     }
 
     async fn enqueue_sorted_packets(&mut self) {
-        /*
-        while let Some(packet) = self.get_next_packet().await {
-            match self.sorted_packet_queue_tx.try_send(packet) {
-                Ok(_) => {}
-                Err(e) => {
-                    match e {
-                        TrySendError::Full(_) => {
-                            error!("Packet sorter queue is full! Dropping packets!")
-                        }
-                        TrySendError::Closed(_) => {
-                            error!("Packet sorter queue is closed!")
-                        }
-                    }
-                }
-            }
-        }*/
-
         while let Some(packet) = self.get_next_packet().await {
             match self.sorted_packet_queue_tx.try_send(packet) {
                 Ok(_) => {}
@@ -159,10 +128,7 @@ impl PacketSorter {
             } else {
                 // We have already checked if something is in the queue, so it is safe to unwrap here.
                 let next_timestamp = self.packet_queue
-                    .first_entry()
-                    .unwrap()
-                    .get()
-                    .timestamp;
+                    .get_oldest_timestamp().unwrap();
 
                 let time_waited_in_queue = next_timestamp.elapsed();
                 // Fire instantly because the next packet has already waited long enough
