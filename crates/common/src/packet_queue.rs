@@ -62,10 +62,6 @@ impl PacketQueue {
     pub fn is_empty(&self) -> bool {
         self.seq_ordered.is_empty()
     }
-
-    pub fn len(&self) -> usize {
-        self.seq_ordered.len()
-    }
 }
 
 #[cfg(test)]

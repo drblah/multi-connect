@@ -154,10 +154,6 @@ impl PacketSorter {
         }
     }
 
-    pub fn get_queue_length(&self) -> usize {
-        self.packet_queue.len()
-    }
-
     pub fn have_next_packet(&mut self) -> bool {
         match self.packet_queue.first_entry() {
             Some(pkt) => {
