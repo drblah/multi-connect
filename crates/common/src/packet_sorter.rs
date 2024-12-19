@@ -45,8 +45,17 @@ impl PacketSorter {
                 let pkt = self.packet_queue.pop_first().unwrap();
 
                 let mut deadline_lock = self.deadline_timer.lock().await;
-                *deadline_lock = tokio::time::interval_at( tokio::time::Instant::now() + self.deadline, self.deadline);
-                self.deadline_active = true;
+
+
+                if let Some(oldest_timestamp) = self.packet_queue.get_oldest_timestamp() {
+                    let time_waited_in_queue = oldest_timestamp.elapsed();
+                    *deadline_lock = tokio::time::interval_at( tokio::time::Instant::now() + self.deadline - time_waited_in_queue, self.deadline);
+                    self.deadline_active = true;
+                } else {
+                    //*deadline_lock = tokio::time::interval_at( tokio::time::Instant::now() + self.deadline, self.deadline);
+                    *deadline_lock = tokio::time::interval_at(tokio::time::Instant::now(), self.deadline); //
+                    self.deadline_active = true;
+                }
 
                 return Some(pkt)
             }
