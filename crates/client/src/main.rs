@@ -1,11 +1,9 @@
-use common::{connection_manager, ConnectionInfo, endpoint, settings};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use common::{connection_manager, ConnectionInfo, settings};
+use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
-use anyhow::Result;
 use clap::Parser;
-use smol::future::{FutureExt};
-use common::messages::{EndpointId, Packet};
 use log::{debug, error, info};
+use tokio::select;
 use tokio_tun::{TunBuilder};
 use common::interface_logger::InterfaceLogger;
 use common::packet_sorter_log::PacketSorterLogger;
@@ -17,17 +15,6 @@ struct Args {
     /// Path to the configuration file
     #[clap(long, action = clap::ArgAction::Set)]
     config: String,
-}
-
-enum Events {
-    NewEstablishedMessage(Result<endpoint::ReadInfo>),
-    ConnectionTimeout((EndpointId, String, SocketAddr)),
-    PacketSorter(EndpointId),
-    TunnelPacket(std::io::Result<usize>),
-    #[allow(dead_code)]
-    SendKeepalive(tokio::time::Instant),
-    NewSortedPacket((EndpointId, Option<Packet>)),
-    DuplicationMessage((usize, SocketAddr))
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -128,38 +115,10 @@ async fn main() {
 
     loop {
         if connection_manager.has_endpoints() {
-            let wrapped_endpoints =
-                async { Events::NewEstablishedMessage(connection_manager.await_incoming().await) };
-            let wrapped_connection_timeout =
-                async { Events::ConnectionTimeout(connection_manager.await_timeout().await) };
-            let wrapped_packet_sorter = async {
-                Events::PacketSorter(connection_manager.await_packet_sorters().await)
-            };
-            let wrapped_tunnel_device = async {
-                Events::TunnelPacket(tun.recv(&mut tun_buffer).await)
-            };
-            let wrapped_keepalive_timer = async {
-                Events::SendKeepalive( keepalive_timer.tick().await )
-            };
-            let wrapped_new_sorted_packet = async {
-                Events::NewSortedPacket(connection_manager.await_endpoint_sorted_packets().await)
-            };
-            let wrapped_duplication_socket = async {
-                Events::DuplicationMessage(duplication_socket.recv_from(&mut duplication_message_buffer).await.unwrap())
-            };
-
-            match wrapped_keepalive_timer
-                .or(
-                    wrapped_connection_timeout
-                    .race(wrapped_packet_sorter)
-                    .race(wrapped_tunnel_device)
-                    .race(wrapped_endpoints)
-                    .race(wrapped_new_sorted_packet)
-                    .race(wrapped_duplication_socket)
-                )
-                .await
-            {
-                Events::NewEstablishedMessage(result) => match result {
+            
+            select! {
+                result = connection_manager.await_incoming() => {
+                    match result {
                     Ok(read_info) => {
                         //info!("Endpoint: {}, produced message: {:?}", endpointid, message);
                         connection_manager.handle_established_message(
@@ -169,15 +128,19 @@ async fn main() {
                     }
                     Err(e) => {
                         error!("Encountered error: {}", e.to_string())
+                        }
                     }
-                },
-                Events::ConnectionTimeout((endpoint, interface_name, socket)) => {
+                }
+                
+                (endpoint, interface_name, socket) = connection_manager.await_timeout() => {
                     connection_manager.remove_connection(endpoint, interface_name, socket)
                 }
-                Events::PacketSorter(endpoint_id) => {
+                
+                endpoint_id = connection_manager.await_packet_sorters() => {
                     connection_manager.handle_packet_sorter_deadline(endpoint_id).await;
                 }
-                Events::TunnelPacket(maybe_packet) => {
+                
+                maybe_packet = tun.recv(&mut tun_buffer) => {
                     match maybe_packet {
                         Ok(packet_length) => {
                             connection_manager.handle_packet_from_tun(&tun_buffer[..packet_length]).await;
@@ -185,7 +148,8 @@ async fn main() {
                         Err(e) => error!("Error while reading from tun device: {}", e.to_string())
                     }
                 }
-                Events::SendKeepalive(_) => {
+                
+                _ = keepalive_timer.tick() => {
                     info!("Sending keepalive");
                     connection_manager.greet_all_endpoints().await;
 
@@ -198,9 +162,9 @@ async fn main() {
                     if let Some(packet_sorter_logger) = &mut packet_sorter_logger {
                         packet_sorter_logger.flush().await;
                     }
-
                 }
-                Events::NewSortedPacket((_endpoint_id, maybe_packet)) => {
+                
+                (_endpoint_id, maybe_packet) = connection_manager.await_endpoint_sorted_packets() => {
                     if let Some(packet) = maybe_packet {
                         if let Some(packet_sorter_logger) = &mut packet_sorter_logger {
                             packet_sorter_logger.add_log_line(
@@ -211,12 +175,16 @@ async fn main() {
                         tun.send(packet.bytes.as_slice()).await.unwrap();
                     }
                 }
-                Events::DuplicationMessage((size, _addr)) => {
-                    let duplication_message = &duplication_message_buffer[..size];
-                    debug!("Duplication raw: {:?}", duplication_message);
-                    connection_manager.handle_selective_duplication_command(duplication_message);
+                
+                maybe_duplication_msg = duplication_socket.recv_from(&mut duplication_message_buffer) => {
+                    if let Ok((size, _addr)) = maybe_duplication_msg {
+                        let duplication_message = &duplication_message_buffer[..size];
+                        debug!("Duplication raw: {:?}", duplication_message);
+                        connection_manager.handle_selective_duplication_command(duplication_message);
+                    }
                 }
             }
+            
             connection_manager.remove_disconnected();
 
         } else {
