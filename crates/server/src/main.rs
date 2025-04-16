@@ -1,16 +1,14 @@
 use common::connection_manager::ConnectionManager;
-use anyhow::{Result};
-use common::messages::{EndpointId, Packet};
-use smol::future::FutureExt;
 use socket2::SockAddr;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use clap::Parser;
 use log::{debug, error, info};
+use tokio::select;
 use tokio_tun::{TunBuilder};
 use common::interface_logger::InterfaceLogger;
 use common::packet_sorter_log::PacketSorterLogger;
-use common::{endpoint, settings};
+use common::settings;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
@@ -18,20 +16,6 @@ struct Args {
     /// Path to the configuration file
     #[clap(long, action = clap::ArgAction::Set)]
     config: String,
-}
-
-
-
-enum Events {
-    NewConnection((usize, SocketAddr)),
-    NewEstablishedMessage(Result<endpoint::ReadInfo>),
-    ConnectionTimeout((EndpointId, String, SocketAddr)),
-    PacketSorter(EndpointId),
-    TunnelPacket(std::io::Result<usize>),
-    NewSortedPacket((EndpointId, Option<Packet>)),
-    #[allow(dead_code)]
-    FlushInterfaceLog(tokio::time::Instant),
-    DuplicationMessage((usize, SocketAddr))
 }
 
 
@@ -116,47 +100,19 @@ async fn main() {
 
     loop {
         if conman.has_endpoints() {
+
             // In case we have active connections. Await new connection attempts and await messages
             // from existing connections.
-
-            let wrapped_server = async {
-                Events::NewConnection(server_socket.recv_from(&mut udp_buffer).await.unwrap())
-            };
-            let wrapped_endpoints =
-                async { Events::NewEstablishedMessage(conman.await_incoming().await) };
-            let wrapped_connection_timeout =
-                async { Events::ConnectionTimeout(conman.await_timeout().await) };
-            let wrapped_packet_sorter = async {
-                Events::PacketSorter(conman.await_packet_sorters().await)
-            };
-            let wrapped_tunnel_device = async {
-                Events::TunnelPacket(tun_device.recv(&mut tun_buffer).await)
-            };
-            let wrapped_new_sorted_packet = async {
-                Events::NewSortedPacket(conman.await_endpoint_sorted_packets().await)
-            };
-            let wrapped_flush_interface_log = async {
-                Events::FlushInterfaceLog(flush_interface_log_timer.tick().await)
-            };
-            let wrapped_duplication_socket = async {
-                Events::DuplicationMessage(duplication_socket.recv_from(&mut duplication_message_buffer).await.unwrap())
-            };
-
-            match wrapped_server
-                .race(wrapped_endpoints)
-                .race(wrapped_connection_timeout)
-                .race(wrapped_packet_sorter)
-                .race(wrapped_tunnel_device)
-                .race(wrapped_new_sorted_packet)
-                .race(wrapped_flush_interface_log)
-                .race(wrapped_duplication_socket)
-                .await
-            {
-                Events::NewConnection((len, addr)) => {
-                    conman.handle_hello(udp_buffer[..len].to_vec(), addr, server_interface_name.clone()).await;
+            select! {
+                maybe_new_connection = server_socket.recv_from(&mut udp_buffer) => {
+                    if let Ok((len, addr)) = maybe_new_connection {
+                        conman.handle_hello(udp_buffer[..len].to_vec(), addr, server_interface_name.clone()).await;
+                    }
                 }
-                Events::NewEstablishedMessage(result) => match result {
-                    Ok(read_info) => {
+                
+                maybe_established_msg = conman.await_incoming() => {
+                    match maybe_established_msg {
+                        Ok(read_info) => {
                         //info!("Endpoint: {}, produced message: {:?}", endpointid, message);
                         conman.handle_established_message(
                             read_info,
@@ -165,14 +121,18 @@ async fn main() {
                     Err(e) => {
                         error!("Encountered error: {}", e.to_string())
                     }
-                },
-                Events::ConnectionTimeout((endpoint, interface_name, socket)) => {
+                    }
+                }
+                
+                (endpoint, interface_name, socket) = conman.await_timeout() => {
                     conman.remove_connection(endpoint, interface_name, socket)
                 }
-                Events::PacketSorter(endpoint_id) => {
+                
+                endpoint_id = conman.await_packet_sorters() => {
                     conman.handle_packet_sorter_deadline(endpoint_id).await;
                 }
-                Events::TunnelPacket(maybe_packet) => {
+                
+                maybe_packet = tun_device.recv(&mut tun_buffer) => {
                     match maybe_packet {
                         Ok(packet_length) => {
                             conman.handle_packet_from_tun(&tun_buffer[..packet_length]).await;
@@ -180,7 +140,8 @@ async fn main() {
                         Err(e) => error!("Error while reading from tun device: {}", e.to_string())
                     }
                 }
-                Events::NewSortedPacket((_endpoint_id, maybe_packet)) => {
+                
+                (_endpoint_id, maybe_packet) = conman.await_endpoint_sorted_packets() => {
                     if let Some(packet) = maybe_packet {
                         if let Some(packet_sorter_logger) = &mut packet_sorter_logger {
                             packet_sorter_logger.add_log_line(
@@ -191,37 +152,41 @@ async fn main() {
                         tun_device.send(packet.bytes.as_slice()).await.unwrap();
                     }
                 }
-                Events::FlushInterfaceLog(_) => {
+                
+                _ = flush_interface_log_timer.tick() => {
                     if let Some(interface_logger) = &mut interface_logger {
-                        interface_logger.flush().await;
-                    }
-
-                    if let Some(packet_sorter_logger) = &mut packet_sorter_logger {
-                        packet_sorter_logger.flush().await;
-                    }
+                            interface_logger.flush().await;
+                        }
+    
+                        if let Some(packet_sorter_logger) = &mut packet_sorter_logger {
+                            packet_sorter_logger.flush().await;
+                        }
                 }
-                Events::DuplicationMessage((size, _addr)) => {
-                    let duplication_message = &duplication_message_buffer[..size];
-                    debug!("Duplication raw: {:?}", duplication_message);
-                    conman.handle_selective_duplication_command(duplication_message);
+                
+                maybe_duplication_msg = duplication_socket.recv_from(&mut duplication_message_buffer) => {
+                    if let Ok((size, _addr)) = maybe_duplication_msg {
+                        let duplication_message = &duplication_message_buffer[..size];
+                        debug!("Duplication raw: {:?}", duplication_message);
+                        conman.handle_selective_duplication_command(duplication_message);
+                    }
                 }
             }
+            
+            
+            
 
             // Clean up connections which was determined to be disconnected on the last iteration
             conman.remove_disconnected();
         } else {
             // In case we have no connections. Only await new ones
             info!("Server has no active Endpoints. Waiting...");
-
-            let wrapped_server = async {
-                Events::NewConnection(server_socket.recv_from(&mut udp_buffer).await.unwrap())
-            };
-
-            match wrapped_server.await {
-                Events::NewConnection((len, addr)) => {
-                    conman.handle_hello(udp_buffer[..len].to_vec(), addr, server_interface_name.clone()).await;
+            
+            select! {
+                maybe_new_connection = server_socket.recv_from(&mut udp_buffer) => {
+                    if let Ok((len, addr)) = maybe_new_connection {
+                        conman.handle_hello(udp_buffer[..len].to_vec(), addr, server_interface_name.clone()).await;
+                    }
                 }
-                _ => continue,
             }
         }
     }
