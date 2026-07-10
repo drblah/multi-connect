@@ -13,7 +13,7 @@ bincode = "1.3.3"
 anyhow = "1.0.75"
 uuid =  { version = "1.4.1", features = [ "serde" , "v4"]}
 nix = { version = "0.27.1", features = ["ioctl", "net"] }
-socket2 = "0.5.7"
+socket2 = { version = "0.5.7", features = ["all"] }
 futures = "0.3.28"
 tokio-tun = "0.11.2"
 log = "0.4.20"
